@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: pulse-vinyl-web
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app --workers 1 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: PULSE_COOKIE_SECURE
+        value: "1"
+      - key: PULSE_SESSION_TTL
+        value: "43200"

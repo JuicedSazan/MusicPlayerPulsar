@@ -1,0 +1,132 @@
+PULSE VINYL v10.2 — Butterchurn + Noisemaker
+
+ЗАПУСК
+1. Распакуй архив в отдельную папку.
+2. Запусти start.bat. При первом запуске скрипт установит Python-библиотеку yandex-music (нужен интернет).
+3. Открой локальный адрес, который появится в консоли, войди в Яндекс Музыку и включи трек.
+4. Нажми «Сменить визуализатор» и выбери один из новых режимов.
+
+ИЗМЕНЕНИЯ В v10.2.1
+- Реальная интеграция Butterchurn — WebGL-движок MilkDrop с набором пресетов butterchurn-presets. Пресеты автоматически меняются во время воспроизведения.
+- Исходники Noisemaker сохранены в проекте, но проблемные DSL-пресеты заменены на отдельные аудиореактивные визуальные режимы: прежняя shader-конфигурация не давала ожидаемого движения.
+- Visualize (предоставленный репозиторий) использован как дополнительный референс интеграции Noisemaker; исходники сохранены в vendor-source/visualize-source.
+- Возвращена прежняя, более умеренная высота Signal Analysis; снижены верхние пики Peaks и Glowing Beats; Holo Grid получил более низкую линию горизонта и более короткие столбцы.
+- Режимы Liquid Shader, Fractal Tunnel и Nebula перерисованы: теперь это разные аудиореактивные формы (жидкие контуры, перспективный тоннель и туманность из спиральных частиц), а не смена оттенка.
+- Остальные функции плеера и локальный Python API сохранены.
+
+ВАЖНО
+- Сам плеер и его API работают локально, но Butterchurn и его MilkDrop-пресеты загружаются из официального CDN при первом выборе режима, поэтому для Butterchurn требуется интернет. Noisemaker и его шейдерные эффекты работают из локальных исходников; без интернета остаются доступны Noisemaker и остальные локальные режимы.
+- Noisemaker загружает движок и эффекты из локальной папки vendor-source/noisemaker-source/shaders. Для этих режимов интернет не требуется после распаковки. Нужен современный браузер с WebGL2.
+- Для корректного аудиоанализа включи воспроизведение до выбора режима. В режиме Butterchurn звук берётся из существующего аудиографа плеера; Noisemaker получает частотные полосы low/mid/high из того же анализатора.
+- Архив включает исходники библиотек и лицензии в vendor-source.
+
+ПРОВЕРКИ
+- Проверен синтаксис app.js и engines.js (Node.js).
+- Проверена компиляция server.py (Python).
+- Полный тест входа в Яндекс и WebGL-рендеринга в целевом браузере не проводился в среде сборки; CDN/WebGL могут зависеть от сети и возможностей видеодрайвера.
+
+
+Pulse Vinyl v10.2 fixes: separate canvas contexts for Butterchurn WebGL and the Noisemaker-style 2D visualizers; Signal Analysis maximum bar amplitude 150%; Peaks, Glowing Beats and Holo Grid amplitude 200%.
+
+
+v10.3 WebGL engine integration update:
+- Butterchurn remains on its own WebGL canvas.
+- Noisemaker modes now call the vendored Noisemaker shader runtime and render on a separate canvas, instead of the previous custom Canvas 2D imitation.
+- Noisemaker receives the player analyser spectrum for audio-reactive shader parameters.
+- Existing Canvas 2D visualizers are unchanged.
+- Runtime playback/browser testing is intentionally left to the user; the source and archive checks do not guarantee that every shader preset compiles in their browser.
+
+
+PULSE VINYL v10.4 — WEBGL ENGINE FIXES
+- Signal Analysis, Peaks, Glowing Beats и Holo Grid используют коэффициент высоты 110%.
+- Radial, Circle Wave и Neon Tunnel усилены до 110% по соответствующим амплитудам.
+- Исправлен вызов Butterchurn render() на каждом кадре; добавлены проверки этапов загрузки, аудиографа, холста, пресетов и рендерера.
+- Noisemaker загружается с официального CDN (https://shaders.noisedeck.app/1), поскольку путь к его исходникам из предыдущей сборки отсутствовал в архиве. Используется настоящий CanvasRenderer с WebGL 2 и штатными пакетами эффектов.
+- Добавлены поэтапные сообщения об ошибках загрузки каталога, эффектов и компиляции шейдеров; передаются аудиополосы и спектр.
+- Для Butterchurn и Noisemaker необходим интернет при загрузке библиотек/эффектов. Сам плеер и API остаются локальными.
+- Проверены синтаксис app.js/engines.js и целостность ZIP; запуск графических движков в браузере сборочной среды не выполнялся.
+
+
+PULSE VINYL v10.5 — CANVAS SIZE + NOISEMAKER INIT FIX
+- Butterchurn and Noisemaker now receive dimensions from the visible .visual-stage, not the base canvas that is hidden while engine mode is active.
+- Noisemaker loads shader effects using the documented loadEffect() API before compiling the DSL.
+- Added stage-specific diagnostics and renderer/canvas/WebGL status data.
+- Amplitude: Signal Analysis, Peaks, Glowing Beats, Holo Grid = 90%; Radial, Circle Wave, Neon Tunnel = 200%.
+- Other visualizers remain on their existing Canvas 2D renderer and were not migrated.
+
+
+PULSE VINYL v10.6 — VISUALIZER TUNING + DISTINCT NOISEMAKER PRESETS
+- Updated amplitude: Peaks 85%, Signal Analysis 95%, Radial 170%, Glowing Beats 95%, Holo Grid 85%; Circle Wave and Neon Tunnel remain at 200%.
+- Butterchurn visual sensitivity increased by 30% through a separate gain branch feeding its visual analysis only; player playback volume is not changed.
+- Noisemaker Liquid Shader audio sensitivity increased by 30% (clamped to valid range).
+- Fixed preset overlap: Fractal Tunnel now explicitly includes the tunnel filter; Nebula uses the fractal generator. Different effects are loaded per preset and the previous pipeline is stopped before compiling the new one.
+- Existing non-Noisemaker visualizers remain on Canvas 2D.
+- Browser runtime testing was not performed; please test the three Noisemaker modes after launch. The archive/syntax checks do not guarantee the CDN's exact effect catalog/API in every browser.
+
+
+PULSE VINYL v10.7 — AUDIO SENSITIVITY + NOISEMAKER FIX
+- Amplitude: Peaks 70%, Signal Analysis 100%, Radial 150%, Glowing Beats 100%, Holo Grid 70%, Circle Wave 90%; Neon Tunnel remains 200%.
+- Butterchurn remains at +30% visual sensitivity.
+- Liquid Shader increased by a further 70% over its previous +30% setting (effective 2.21× baseline visual analysis gain); playback audio is unchanged.
+- Fractal Tunnel visual sensitivity reduced to 50%.
+- Nebula no longer requests the unavailable synth/fractal.js bundle. It uses the known-supported synth/noise effect with a distinct high-octave, slower, audio-reactive configuration.
+- Noisemaker now stops the previous preset before loading/compiling another, preventing a failed preset switch from leaving the previous effect visible. Error objects are serialized into useful diagnostics instead of [object Object].
+- Other visualizers remain on their existing Canvas 2D renderer.
+- JavaScript syntax and ZIP integrity checked; browser runtime was not tested.
+
+
+PULSE VINYL v10.8 — BUTTERCHURN AUDIO + 10 FIXED MILKDROP SCENES
+
+- Исправлена критичная ошибка аудиовхода: после подключения визуализатора больше не обнуляется gain-узел, через который Butterchurn получает сигнал. Ветка анализа отделена от основного выхода плеера; громкость воспроизведения не меняется.
+- Удалена автоматическая смена пресетов по таймеру. Каждая сцена Butterchurn выбирается отдельно и остаётся активной до переключения пользователем.
+- Добавлены первые 10 пресетов из набора Butterchurn Presets как десять самостоятельных режимов в общем переключателе визуализаторов.
+- Ускорена первая загрузка: больше не загружается весь большой пакет пресетов с CDN. Движок Butterchurn загружается отдельно, а выбранный JSON-пресет подгружается с локального сервера и кешируется.
+- Остальные визуализаторы и три режима Noisemaker сохранены без изменений.
+- Для загрузки самого движка Butterchurn по-прежнему требуется интернет; десять JSON-пресетов включены в архив и доступны локально.
+
+Проверки v10.8: синтаксис JavaScript и целостность ZIP проверяются перед передачей. Фактический запуск в браузере и тест реакции на звук требуют проверки на компьютере пользователя.
+
+
+Pulse Vinyl v10.8.2 — Butterchurn CDN hotfix
+- Replaced CDN-generated ESM wrappers with direct imports of the published Butterchurn ESM build (jsDelivr, then unpkg fallback).
+- Prevented the same fatal Butterchurn loading error from being logged on every animation frame; selecting a Butterchurn scene allows a retry.
+- Added an empty data favicon to suppress the harmless favicon.ico 404.
+
+
+Pulse Vinyl v10.8.4
+- Butterchurn 2.6.7 is now bundled locally at vendor/butterchurn/butterchurn.min.js.
+- The browser loads the official self-contained UMD build from the local server before engines.js.
+- Butterchurn no longer uses jsDelivr, unpkg, esm.sh, or dynamic CDN imports.
+- Added a local favicon.svg to avoid the favicon.ico 404 request.
+- Noisemaker remains on its existing remote shader runtime.
+
+
+Версия 10.8.4 — диагностика Butterchurn:
+- Ошибки Butterchurn теперь показывают этап выполнения (загрузка библиотеки/пресета, разбор JSON, создание WebGL, применение пресета, отрисовка).
+- В F12 → Console выводится объект полной диагностики со stack и cause/causeStack.
+- Повторяющиеся одинаковые ошибки больше не засоряют консоль каждый кадр.
+
+
+v10.8.5
+- Обновлён Butterchurn до 3.0.0-beta.5 (локальный ES module).
+- MilkDrop EEL equations исполняются встроенным eel-wasm runtime.
+- loadPreset() ожидается через await, поскольку API Butterchurn 3 асинхронный.
+- Noisemaker и остальные визуализаторы сохранены без изменений.
+
+
+Версия 10.9.0:
+- Добавлена светлая/тёмная тема с сохранением выбора.
+- Удалена сцена MilkDrop 04 · Untitled.
+- Добавлены 9 MilkDrop-пресетов: organic12-3d-2, Reaction Diffusion 3 (Overload Mix 2), Potion of Spirits, witchcraft 2.0, alien fish pond, bouncing balls [double mindblob neon mix], infused with the spiral, mindblob [shiny mix], mom, why the sky looks different today.
+- Royal Mashup (220) и (431) уже присутствовали в предыдущей версии и сохранены.
+
+
+Версия 10.9.1:
+- В тёмной теме кнопка «По ссылке» получила чёрный фон, белую обводку и белый текст.
+- Кнопки Play и поиска получили более приглушённый зелёный оттенок.
+- Удалены неработающие сцены: bouncing balls [double mindblob neon mix], Reaction Diffusion 3 (Overload Mix 2) и MilkDrop 03 · Desert Rose.
+- Кнопка боковой панели теперь плавно перемещается по диагонали из положения у края сайдбара/шапки в верхний левый угол.
+- Стрелки переключения визуализаторов выровнены по центру кнопок.
+
+
+Версия 10.9.2: скорректировано положение кнопки скрытой боковой панели. В свёрнутом состоянии кнопка закреплена в верхнем левом углу окна приложения (top: 12px, left: 10px); правило имеет приоритет над старыми стилями. При раскрытой панели прежнее положение сохраняется. Обновлена версия CSS для сброса кеша.
