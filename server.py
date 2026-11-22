@@ -325,7 +325,7 @@ def api_track():
                 duration = getattr(full, "duration_ms", 0) or 0
                 filename = s["cache_dir"] / f"{track}_{album}.mp3"
                 if filename.exists() and (filename.stat().st_size < 4096 or filename.read_bytes()[:100].lstrip().lower().startswith((b"<html", b"<!doctype", b'{"error'))): filename.unlink(missing_ok=True)
-                if not filename.exists(): full.download(str(filename), codec="mp3", bitrate_in_kbps=192, timeout=75)
+                if not filename.exists(): full.download(str(filename), codec="mp3", bitrate_in_kbps=192)
                 if not filename.exists() or filename.stat().st_size < 4096:
                     filename.unlink(missing_ok=True); raise RuntimeError("Скачанный аудиофайл пустой или слишком маленький.")
                 head = filename.read_bytes()[:4]
