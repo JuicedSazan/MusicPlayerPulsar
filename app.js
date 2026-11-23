@@ -122,7 +122,7 @@ async function fetchMoreWave(){
   waveLoading=true;
   try{
    const played=[...waveHistory,...(current>=0&&queue[current]?[queue[current]]:[])];
-   const ids=[...new Set(played.map(t=>String(t.track_id||String(t.id||'').split(':')[0])).filter(id=>/^\\d+$/.test(id)))];
+   const ids=[...new Set(played.map(t=>String(t.track_id||String(t.id||'').split(':')[0])).filter(id=>/^\d+$/.test(id)))];
    const d=await fetchJson('/api/my-wave?queue='+encodeURIComponent(ids.join(',')));
    const seen=new Set([...waveHistory,...queue].map(t=>t.id));
    const fresh=(d.tracks||[]).filter(t=>!seen.has(t.id));
