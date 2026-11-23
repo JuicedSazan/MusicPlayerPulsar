@@ -263,7 +263,15 @@ def api_my_wave():
     client = _get_client(state())
     if not client: return api_error("Сначала войди в Яндекс.", 401)
     try:
-        result = client.rotor_station_tracks("user:onyourwave", settings2=True)
+        # Rotor returns a finite batch. Pass already played track IDs to request
+        # the next batch instead of restarting the same recommendation sequence.
+        played_ids = [
+            value.strip() for value in request.args.get("queue", "").split(",")
+            if value.strip().isdigit()
+        ][:500]
+        result = client.rotor_station_tracks(
+            "user:onyourwave", settings2=True, queue=played_ids or None
+        )
         items = []
         for entry in (getattr(result, "sequence", None) or []):
             tr = getattr(entry, "track", None)
