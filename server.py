@@ -95,6 +95,18 @@ def api_error(message, status=400):
     return jsonify({"error": str(message)[:500]}), status
 
 
+def _cover_url(tr):
+    albums = getattr(tr, "albums", []) or []
+    artists = getattr(tr, "artists", []) or []
+    uri = (getattr(albums[0], "cover_uri", None) if albums else None)
+    if not uri and artists:
+        artist_cover = getattr(artists[0], "cover", None)
+        uri = getattr(artist_cover, "uri", None) or getattr(artists[0], "cover_uri", None)
+    if not uri:
+        return ""
+    return "https://" + str(uri).removeprefix("https://").removeprefix("http://").replace("%%", "400x400")
+
+
 def _track_item(tr):
     albums = getattr(tr, "albums", []) or []
     album_id = getattr(albums[0], "id", None) if albums else None
@@ -103,9 +115,7 @@ def _track_item(tr):
         return None
     artists = getattr(tr, "artists", []) or []
     artist = ", ".join(getattr(a, "name", "") for a in artists if getattr(a, "name", None)) or "Исполнитель не определён"
-    cover = getattr(tr, "cover_uri", None) or ""
-    if cover:
-        cover = "https://" + cover.removeprefix("https://").removeprefix("http://").replace("%%", "400x400")
+    cover = _cover_url(tr)
     return {
         "id": f"{track_id}:{album_id}", "track_id": str(track_id), "album_id": str(album_id),
         "title": getattr(tr, "title", None) or "Неизвестный трек", "artist": artist,
@@ -400,7 +410,7 @@ def api_track():
                     "file_size_bytes": filename.stat().st_size,
                 }
                 with s["lock"]:
-                    s["jobs"][job_id].update(status="done", progress="Трек готов", result={"title": title, "artist": artist, "duration": duration, "cover": (("https://" + (getattr(full, "cover_uri", "") or "").removeprefix("https://").removeprefix("http://").replace("%%", "400x400")) if getattr(full, "cover_uri", None) else ""), "src": f"/api/audio/{track}_{album}.mp3", "id": f"{track}:{album}"}, timings=timings, updated=time.time())
+                    s["jobs"][job_id].update(status="done", progress="Трек готов", result={"title": title, "artist": artist, "duration": duration, "cover": _cover_url(full), "src": f"/api/audio/{track}_{album}.mp3", "id": f"{track}:{album}"}, timings=timings, updated=time.time())
                 return
             except Exception as exc:
                 last_error = str(exc)
