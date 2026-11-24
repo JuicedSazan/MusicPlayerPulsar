@@ -286,3 +286,17 @@ body.collapsed #showSidebar.corner-menu{
 @media(max-width:650px){
   body.collapsed #showSidebar.corner-menu{top:12px!important;left:10px!important}
 }
+
+
+/* Mobile header: search gets a full-width row; results stay within the viewport */
+@media(max-width:650px){
+ header{height:auto!important;min-height:0;display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;padding:10px 12px!important;overflow:visible!important}
+ .header-search{grid-column:1/-1;grid-row:1;position:relative!important;left:auto!important;right:auto!important;transform:none!important;width:100%!important;min-width:0!important}
+ .search-input-row{width:100%;min-width:0}
+ .search-input-row input{width:100%;min-width:0;height:42px;font-size:14px!important;padding:10px 12px!important}
+ .search-input-row button{height:42px;flex:0 0 42px}
+ #themeToggle{display:none!important}
+ #linkToggle{grid-column:2;grid-row:2;justify-self:end;white-space:nowrap}
+ .search-dropdown{position:fixed!important;top:112px!important;left:12px!important;right:12px!important;width:auto!important;max-width:none!important;max-height:calc(100dvh - 128px)!important;overflow-y:auto!important;overscroll-behavior:contain}
+ .search-results{max-height:none!important;overflow:visible!important}
+}
