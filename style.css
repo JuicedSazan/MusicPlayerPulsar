@@ -403,3 +403,20 @@ body[data-theme="dark"] .choose-viz{background:#398cff;color:#fff}
 .label img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;z-index:2}
 .label img[hidden]{display:none}
 .label .spindle{z-index:4}
+
+/* Pulsar dark-theme refinement */
+body[data-theme="dark"] .queue-item:hover{background:#303b48!important}
+body[data-theme="dark"] .auth-dialog{background:#1d2632;color:#edf4ff;border-color:#405064;box-shadow:0 28px 90px #0009}
+body[data-theme="dark"] .auth-dialog p,body[data-theme="dark"] .auth-code-instructions{color:#b4c2d2}
+body[data-theme="dark"] .auth-code-instructions{background:#263444}
+body[data-theme="dark"] .auth-code-wrap-modal,body[data-theme="dark"] .auth-code-row,body[data-theme="dark"] .auth-dialog input{background:#17212c;color:#edf4ff;border-color:#405064}
+body[data-theme="dark"] .auth-close{color:#c5d4e5}
+body[data-theme="dark"] .auth-start,body[data-theme="dark"] .auth-code-row button{background:#3688e8;color:#fff;border-color:#3688e8}
+body[data-theme="dark"] .auth-frame-wrap{background:#17212c;border-color:#405064}
+body[data-theme="dark"] .viz-arrow{background:#172638e8;border-color:#52749b;color:#eaf3ff}
+body[data-theme="dark"] .viz-arrow:hover{background:#3688e8!important;color:#fff!important;border-color:#3688e8;box-shadow:0 0 0 3px #3688e833,0 8px 28px #0005}
+.visual-stage{position:relative;overflow:visible}
+.visual-stage .viz-arrow{position:absolute!important;top:50%!important;transform:translateY(-50%)!important;z-index:30}
+.visual-stage .viz-arrow-prev{left:12px!important;right:auto!important}
+.visual-stage .viz-arrow-next{right:12px!important;left:auto!important}
+.visual-stage .viz-arrow:hover{transform:translateY(-50%) scale(1.06)!important}
