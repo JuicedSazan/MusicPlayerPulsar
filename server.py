@@ -37,7 +37,7 @@ except Exception:
 def _new_session():
     return {
         "client": None, "auth": "idle", "auth_url": "", "auth_code": "",
-        "auth_error": "", "jobs": {}, "last_seen": time.time(),
+        "auth_error": "", "auth_generation": 0, "jobs": {}, "last_seen": time.time(),
         "lock": threading.RLock(), "cache_dir": None,
     }
 
@@ -122,10 +122,14 @@ def _start_auth(s):
     with s["lock"]:
         if s["auth"] == "pending":
             return
+        s["auth_generation"] += 1
+        generation = s["auth_generation"]
         s.update(auth="pending", auth_url="", auth_code="", auth_error="", client=None)
 
     def on_code(code):
         with s["lock"]:
+            if s["auth_generation"] != generation or s["auth"] != "pending":
+                return
             s["auth_url"] = code.verification_url
             s["auth_code"] = code.user_code
 
@@ -135,11 +139,15 @@ def _start_auth(s):
             token = client.device_auth(on_code=on_code)
             client = Client(token.access_token).init()
             with s["lock"]:
+                if s["auth_generation"] != generation or s["auth"] != "pending":
+                    return
                 s["client"] = client
                 s["auth"] = "ready"
                 s["auth_error"] = ""
         except Exception as exc:
             with s["lock"]:
+                if s["auth_generation"] != generation or s["auth"] != "pending":
+                    return
                 s["auth"] = "error"
                 s["auth_error"] = str(exc)[:450]
     threading.Thread(target=worker, daemon=True).start()
@@ -201,6 +209,7 @@ def api_logout():
     s = state()
     with s["lock"]:
         s.update(client=None, auth="idle", auth_url="", auth_code="", auth_error="", jobs={})
+        s["auth_generation"] += 1
     # Remove only this browser's temporary cache.
     if s["cache_dir"]:
         shutil.rmtree(s["cache_dir"], ignore_errors=True)
