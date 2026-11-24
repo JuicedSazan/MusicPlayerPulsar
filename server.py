@@ -318,6 +318,28 @@ def api_resolve():
         return api_error("Не удалось получить данные трека: " + str(exc)[:350], 502)
 
 
+@app.post("/api/track-reaction")
+def api_track_reaction():
+    payload = request.get_json(silent=True) or {}
+    track_id = str(payload.get("track_id", "")).strip()
+    action = payload.get("action")
+    if not track_id.isdigit() or action not in ("like", "dislike"):
+        return api_error("Некорректный идентификатор трека или действие.")
+    client = _get_client(state())
+    if not client:
+        return api_error("Сначала войди в Яндекс.", 401)
+    try:
+        if action == "like":
+            ok = client.users_likes_tracks_add(track_id)
+        else:
+            ok = client.users_dislikes_tracks_add(track_id)
+        if not ok:
+            raise RuntimeError("Яндекс не подтвердил изменение оценки.")
+        return jsonify({"ok": True, "action": action})
+    except Exception as exc:
+        return api_error("Яндекс не принял оценку: " + str(exc)[:300], 502)
+
+
 @app.get("/api/track")
 def api_track():
     url = request.args.get("url", "")
