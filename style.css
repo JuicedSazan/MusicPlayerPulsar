@@ -379,3 +379,15 @@ body[data-theme="dark"] .side-section-label{color:#8da8c8}
 body[data-theme="dark"] .auth-status{color:#a9bfdc}
 .control.primary{display:grid;place-items:center;line-height:1;padding:0}
 .header-search button{display:grid;place-items:center;line-height:1;padding:0}
+
+body[data-theme="dark"] .iconbtn:hover,
+body[data-theme="dark"] .theme-toggle:hover,
+body[data-theme="dark"] .change-viz:hover,
+body[data-theme="dark"] #showSidebar:hover{background:#398cff!important;color:#fff!important}
+body[data-theme="dark"] .pulse{background:#398cff;box-shadow:0 0 0 4px #398cff35}
+body[data-theme="dark"] input[type="range"]{accent-color:#398cff}
+body[data-theme="dark"] .add-form button,
+body[data-theme="dark"] .search-form button,
+body[data-theme="dark"] .choose-viz{background:#398cff;color:#fff}
+.record-ring-text text{font-size:12px;letter-spacing:1.8px}
+.record-ring-text textPath{dominant-baseline:middle}
