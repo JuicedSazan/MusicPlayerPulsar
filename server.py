@@ -180,7 +180,14 @@ def static_files(filename):
 def api_status():
     s = state()
     with s["lock"]:
-        return jsonify({k: s[k] for k in ("auth", "auth_url", "auth_code", "auth_error")})
+        payload = {"auth": s["auth"], "auth_error": s["auth_error"]}
+        # Device code is short-lived and is only useful while login is pending.
+        if s["auth"] == "pending":
+            payload.update(auth_url=s["auth_url"], auth_code=s["auth_code"])
+        else:
+            s["auth_url"] = ""
+            s["auth_code"] = ""
+        return jsonify(payload)
 
 
 @app.post("/api/login")
@@ -210,8 +217,10 @@ def api_search():
     if not client:
         return api_error("Сначала войди в Яндекс через вкладку авторизации.", 401)
     try:
-        result = None; last_error = None
+        started = time.perf_counter()
+        result = None; last_error = None; attempts = 0
         for attempt in range(3):
+            attempts = attempt + 1
             try:
                 result = client.search(query, type_="track", page=0); break
             except Exception as exc:
@@ -220,7 +229,10 @@ def api_search():
         if result is None: raise last_error or RuntimeError("Яндекс не ответил на поисковый запрос.")
         section = getattr(result, "tracks", None)
         items = [item for tr in (getattr(section, "results", []) or [])[:20] if (item := _track_item(tr))]
-        return jsonify({"results": items})
+        return jsonify({"results": items, "timings": {
+            "search_total_ms": round((time.perf_counter() - started) * 1000),
+            "attempts": attempts, "results": len(items)
+        }})
     except Exception as exc:
         return api_error("Поиск не удался: " + str(exc)[:350], 502)
 
@@ -316,32 +328,48 @@ def api_track():
     if not client: return api_error("Сначала авторизуйся через «Войти в Яндекс».", 401)
     job_id = uuid.uuid4().hex
     with s["lock"]:
-        s["jobs"][job_id] = {"status": "working", "progress": "Запрашиваю информацию о треке…", "result": None, "error": None, "updated": time.time()}
+        s["jobs"][job_id] = {"status": "working", "progress": "Запрашиваю информацию о треке…", "result": None, "error": None, "updated": time.time(), "timings": {}}
 
     def work():
         last_error = None
         for attempt in range(1, 4):
             try:
+                attempt_started = time.perf_counter()
                 with s["lock"]:
                     s["jobs"][job_id].update(progress=f"Получаю аудио (попытка {attempt} из 3)…", updated=time.time())
+                lookup_started = time.perf_counter()
                 tracks = client.tracks([f"{track}:{album}"])
+                lookup_ms = round((time.perf_counter() - lookup_started) * 1000)
                 if not tracks: raise RuntimeError("Яндекс не вернул этот трек. Проверь ссылку и доступность трека.")
+                metadata_started = time.perf_counter()
                 full = tracks[0].fetch_track() if hasattr(tracks[0], "fetch_track") else tracks[0]
+                metadata_ms = round((time.perf_counter() - metadata_started) * 1000)
                 title = getattr(full, "title", None) or "Неизвестный трек"
                 artists = getattr(full, "artists", []) or []
                 artist = ", ".join(getattr(a, "name", "") for a in artists if getattr(a, "name", None)) or "Исполнитель не определён"
                 duration = getattr(full, "duration_ms", 0) or 0
                 filename = s["cache_dir"] / f"{track}_{album}.mp3"
                 if filename.exists() and (filename.stat().st_size < 4096 or filename.read_bytes()[:100].lstrip().lower().startswith((b"<html", b"<!doctype", b'{"error'))): filename.unlink(missing_ok=True)
+                download_started = time.perf_counter()
                 if not filename.exists(): full.download(str(filename), codec="mp3", bitrate_in_kbps=192)
+                download_ms = round((time.perf_counter() - download_started) * 1000)
                 if not filename.exists() or filename.stat().st_size < 4096:
                     filename.unlink(missing_ok=True); raise RuntimeError("Скачанный аудиофайл пустой или слишком маленький.")
                 head = filename.read_bytes()[:4]
                 if not (head[:3] == b"ID3" or (len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0)):
 
                     filename.unlink(missing_ok=True); raise RuntimeError("Яндекс вернул файл не в MP3-формате.")
+                timings = {
+                    "track_lookup_ms": lookup_ms,
+                    "metadata_ms": metadata_ms,
+                    "download_ms": download_ms,
+                    "attempt_total_ms": round((time.perf_counter() - attempt_started) * 1000),
+                    "attempt": attempt,
+                    "cache_hit": download_ms < 10 and filename.exists(),
+                    "file_size_bytes": filename.stat().st_size,
+                }
                 with s["lock"]:
-                    s["jobs"][job_id].update(status="done", progress="Трек готов", result={"title": title, "artist": artist, "duration": duration, "src": f"/api/audio/{track}_{album}.mp3", "id": f"{track}:{album}"}, updated=time.time())
+                    s["jobs"][job_id].update(status="done", progress="Трек готов", result={"title": title, "artist": artist, "duration": duration, "src": f"/api/audio/{track}_{album}.mp3", "id": f"{track}:{album}"}, timings=timings, updated=time.time())
                 return
             except Exception as exc:
                 last_error = str(exc)
@@ -359,7 +387,7 @@ def api_track_status():
     s = state()
     with s["lock"]: job = s["jobs"].get(job_id)
     if not job: return api_error("Задание не найдено. Попробуй добавить трек ещё раз.", 404)
-    return jsonify({k: job.get(k) for k in ("status", "progress", "result", "error")})
+    return jsonify({k: job.get(k) for k in ("status", "progress", "result", "error", "timings")})
 
 
 @app.get("/api/audio/<path:filename>")
