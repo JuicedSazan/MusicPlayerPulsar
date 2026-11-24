@@ -1,4 +1,4 @@
-"""Pulse Vinyl Web v1 — multi-user web backend.
+"""Pulsar Web v1 — multi-user web backend.
 
 Each browser receives an opaque, HttpOnly session cookie. Yandex clients,
 authentication state, jobs and audio cache are isolated per session.
@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from flask import Flask, jsonify, request, send_from_directory, make_response, abort
 
 ROOT = Path(__file__).resolve().parent
-DATA_ROOT = Path(os.environ.get("PULSE_DATA_DIR", "/tmp/pulse-vinyl"))
+DATA_ROOT = Path(os.environ.get("PULSE_DATA_DIR", "/tmp/pulsar"))
 CACHE_ROOT = DATA_ROOT / "cache"
 CACHE_ROOT.mkdir(parents=True, exist_ok=True)
 SESSION_TTL = int(os.environ.get("PULSE_SESSION_TTL", "43200"))
@@ -168,7 +168,7 @@ def _valid_yandex_url(url):
 
 @app.get("/health")
 def health():
-    return jsonify({"ok": True, "service": "Pulse Vinyl Web"})
+    return jsonify({"ok": True, "service": "Pulsar Web"})
 
 
 @app.get("/")
@@ -321,7 +321,6 @@ def api_resolve():
         tracks = client.tracks([f"{track}:{album}"])
         if not tracks: raise RuntimeError("Яндекс не вернул этот трек.")
         item = _track_item(tracks[0]) or {}
-        item.pop("cover", None)
         return jsonify(item)
     except Exception as exc:
         return api_error("Не удалось получить данные трека: " + str(exc)[:350], 502)
@@ -401,7 +400,7 @@ def api_track():
                     "file_size_bytes": filename.stat().st_size,
                 }
                 with s["lock"]:
-                    s["jobs"][job_id].update(status="done", progress="Трек готов", result={"title": title, "artist": artist, "duration": duration, "src": f"/api/audio/{track}_{album}.mp3", "id": f"{track}:{album}"}, timings=timings, updated=time.time())
+                    s["jobs"][job_id].update(status="done", progress="Трек готов", result={"title": title, "artist": artist, "duration": duration, "cover": (("https://" + (getattr(full, "cover_uri", "") or "").removeprefix("https://").removeprefix("http://").replace("%%", "400x400")) if getattr(full, "cover_uri", None) else ""), "src": f"/api/audio/{track}_{album}.mp3", "id": f"{track}:{album}"}, timings=timings, updated=time.time())
                 return
             except Exception as exc:
                 last_error = str(exc)
