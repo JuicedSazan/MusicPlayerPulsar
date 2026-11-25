@@ -4,6 +4,7 @@ Each browser receives an opaque, HttpOnly session cookie. Yandex clients,
 authentication state, jobs and audio cache are isolated per session.
 """
 import json
+from concurrent.futures import ThreadPoolExecutor
 import os
 import re
 import secrets
@@ -170,26 +171,37 @@ def _expand_playlist_tracks(client, raw):
                 if aid:
                     expanded[f"{tid}:{aid}"] = track
 
+    # Resolve only entries missed by the batch lookup. Sequential fallback
+    # requests make large playlists take tens of seconds, so use a small pool.
+    missing = []
     result = []
     for entry, (tid, aid) in zip(entries, keys_by_entry):
         full = expanded.get(f"{tid}:{aid}") if tid and aid else None
         full = full or (expanded.get(tid) if tid else None)
+        if full is not None:
+            result.append(full)
+        else:
+            index = len(result)
+            result.append(None)
+            missing.append((index, entry))
 
-        # The library documents fetch_track() as the canonical way to expand
-        # a TrackShort. Use it only when the batch lookup did not resolve it.
-        if full is None:
-            fetch_track = getattr(entry, "fetch_track", None)
-            if callable(fetch_track):
-                try:
-                    candidate = fetch_track()
-                    if candidate:
-                        full = candidate
-                except Exception:
-                    pass
+    def fetch_one(item):
+        index, entry = item
+        fetch_track = getattr(entry, "fetch_track", None)
+        if not callable(fetch_track):
+            return index, entry
+        try:
+            candidate = fetch_track()
+            return index, candidate or entry
+        except Exception:
+            return index, entry
 
-        result.append(full or entry)
-    return result
+    if missing:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for index, resolved in pool.map(fetch_one, missing):
+                result[index] = resolved
 
+    return [track or entry for track, entry in zip(result, entries)]
 
 
 def _start_auth(s):
