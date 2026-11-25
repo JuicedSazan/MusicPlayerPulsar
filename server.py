@@ -183,8 +183,7 @@ def _expand_playlist_tracks(client, raw, diagnostics=None):
         diagnostics["batch_seconds"] = round(time.perf_counter() - batch_started, 3)
         diagnostics["batch_resolved"] = sum(1 for tid, aid in keys_by_entry if (expanded.get(f"{tid}:{aid}") if tid and aid else None) or (expanded.get(tid) if tid else None))
 
-    # Resolve only entries missed by the batch lookup. Sequential fallback
-    # requests make large playlists take tens of seconds, so use a small pool.
+    # Resolve only entries missed by the batch lookup using a bounded pool.
     missing = []
     result = []
     for entry, (tid, aid) in zip(entries, keys_by_entry):
@@ -214,6 +213,10 @@ def _expand_playlist_tracks(client, raw, diagnostics=None):
             for index, resolved in pool.map(fetch_one, missing):
                 result[index] = resolved
 
+    if diagnostics is not None:
+        diagnostics["fallback_count"] = len(missing)
+        diagnostics["fallback_seconds"] = round(time.perf_counter() - fallback_started, 3)
+        diagnostics["expand_seconds"] = round(time.perf_counter() - started, 3)
     return [track or entry for track, entry in zip(result, entries)]
 
 
