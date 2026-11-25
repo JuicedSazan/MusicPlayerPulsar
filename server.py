@@ -124,13 +124,16 @@ def _track_item(tr):
         "url": f"https://music.yandex.ru/album/{album_id}/track/{track_id}"
     }
 
-def _expand_playlist_tracks(client, raw):
+def _expand_playlist_tracks(client, raw, diagnostics=None):
     """Resolve Yandex TrackShort entries into full Track objects.
 
     Prefer batched client.tracks() calls, then use TrackShort.fetch_track()
     for entries that the batch response did not resolve.
     """
+    started = time.perf_counter()
     entries = [getattr(entry, "track", None) or entry for entry in (raw or [])]
+    if diagnostics is not None:
+        diagnostics.update({"raw_entries": len(entries), "unique_track_ids": 0, "batch_count": 0, "batch_seconds": 0.0, "batch_resolved": 0, "fallback_count": 0, "fallback_seconds": 0.0})
     expanded = {}
     requested_by_key = {}
     keys_by_entry = []
@@ -154,10 +157,15 @@ def _expand_playlist_tracks(client, raw):
             expanded.setdefault(tid, entry)
 
     requested = list(requested_by_key)
+    if diagnostics is not None:
+        diagnostics["unique_track_ids"] = len(requested)
     # Keep requests reasonably small; a very large likes collection can
     # otherwise make the API request fail as a whole.
+    batch_started = time.perf_counter()
     for offset in range(0, len(requested), 50):
         batch = requested[offset:offset + 50]
+        if diagnostics is not None:
+            diagnostics["batch_count"] += 1
         try:
             full_tracks = client.tracks(batch) or []
         except Exception:
@@ -170,6 +178,10 @@ def _expand_playlist_tracks(client, raw):
                 expanded[tid] = track
                 if aid:
                     expanded[f"{tid}:{aid}"] = track
+
+    if diagnostics is not None:
+        diagnostics["batch_seconds"] = round(time.perf_counter() - batch_started, 3)
+        diagnostics["batch_resolved"] = sum(1 for tid, aid in keys_by_entry if (expanded.get(f"{tid}:{aid}") if tid and aid else None) or (expanded.get(tid) if tid else None))
 
     # Resolve only entries missed by the batch lookup. Sequential fallback
     # requests make large playlists take tens of seconds, so use a small pool.
@@ -196,6 +208,7 @@ def _expand_playlist_tracks(client, raw):
         except Exception:
             return index, entry
 
+    fallback_started = time.perf_counter()
     if missing:
         with ThreadPoolExecutor(max_workers=8) as pool:
             for index, resolved in pool.map(fetch_one, missing):
@@ -405,7 +418,10 @@ def api_user_playlist():
     client = _get_client(s)
     if not client: return api_error("Сначала войди в Яндекс.", 401)
     playlist_id = request.args.get("id", "")
+    diagnostics = {"playlist_fetch_seconds": 0.0, "serialization_seconds": 0.0}
+    request_started = time.perf_counter()
     try:
+        playlist_started = time.perf_counter()
         if playlist_id == "likes":
             liked = client.users_likes_tracks()
             raw = getattr(liked, "tracks", None) or []
@@ -424,13 +440,21 @@ def api_user_playlist():
             if not raw and hasattr(playlist, "fetch_tracks"):
                 raw = playlist.fetch_tracks() or []
             title = getattr(playlist, "title", None) or "Плейлист"
+        diagnostics["playlist_fetch_seconds"] = round(time.perf_counter() - playlist_started, 3)
+        expand_diagnostics = {}
+        expanded_tracks = _expand_playlist_tracks(client, raw, expand_diagnostics)
+        serialization_started = time.perf_counter()
         tracks = []
-        for tr in _expand_playlist_tracks(client, raw):
+        for tr in expanded_tracks:
             item = _track_item(tr)
             if item: tracks.append(item)
+        diagnostics.update(expand_diagnostics)
+        diagnostics["serialization_seconds"] = round(time.perf_counter() - serialization_started, 3)
+        diagnostics["total_seconds"] = round(time.perf_counter() - request_started, 3)
+        diagnostics["serialized_tracks"] = len(tracks)
         if not tracks:
-            return jsonify({"title": title, "tracks": [], "message": "В этом плейлисте пока нет доступных треков."})
-        return jsonify({"title": title, "tracks": tracks})
+            return jsonify({"title": title, "tracks": [], "message": "В этом плейлисте пока нет доступных треков.", "diagnostics": diagnostics})
+        return jsonify({"title": title, "tracks": tracks, "diagnostics": diagnostics})
     except Exception as exc:
         return api_error("Не удалось открыть плейлист: " + str(exc)[:350], 502)
 
