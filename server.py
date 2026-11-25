@@ -125,35 +125,38 @@ def _track_item(tr):
 
 def _expand_playlist_tracks(client, raw):
     entries = [getattr(entry, "track", None) or entry for entry in (raw or [])]
-    ids = []
+    requested = []
+    keys_by_entry = []
     for entry in entries:
-        value = getattr(entry, "track_id", None)
-        if value:
-            ids.append(str(value))
+        tid = getattr(entry, "track_id", None) or getattr(entry, "id", None)
+        aid = getattr(entry, "album_id", None)
+        if tid and aid:
+            requested.append(f"{tid}:{aid}")
+            keys_by_entry.append((str(tid), str(aid)))
+        elif tid:
+            requested.append(str(tid))
+            keys_by_entry.append((str(tid), ""))
         else:
-            track_id = getattr(entry, "id", None)
-            album_id = getattr(entry, "album_id", None)
-            if track_id and album_id:
-                ids.append(f"{track_id}:{album_id}")
+            keys_by_entry.append(("", ""))
     expanded = {}
-    if ids:
+    if requested:
+        # The Yandex API accepts both track IDs and track:album IDs.
         try:
-            for track in (client.tracks(list(dict.fromkeys(ids))) or []):
+            full_tracks = client.tracks(list(dict.fromkeys(requested))) or []
+            for track in full_tracks:
+                tid = str(getattr(track, "id", "") or "")
                 albums = getattr(track, "albums", []) or []
-                album_id = getattr(albums[0], "id", None) if albums else None
-                if getattr(track, "id", None) and album_id:
-                    expanded[f"{track.id}:{album_id}"] = track
+                aid = str(getattr(albums[0], "id", "") or "") if albums else ""
+                if tid:
+                    expanded[tid] = track
+                    if aid:
+                        expanded[f"{tid}:{aid}"] = track
         except Exception:
             pass
     result = []
-    for entry in entries:
-        value = getattr(entry, "track_id", None)
-        if value:
-            full = expanded.get(str(value))
-            if full: result.append(full); continue
-        item_id = getattr(entry, "id", None)
-        album_id = getattr(entry, "album_id", None)
-        full = expanded.get(f"{item_id}:{album_id}") if item_id and album_id else None
+    for entry, (tid, aid) in zip(entries, keys_by_entry):
+        full = expanded.get(f"{tid}:{aid}") if tid and aid else None
+        full = full or expanded.get(tid) if tid else None
         result.append(full or entry)
     return result
 
