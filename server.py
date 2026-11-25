@@ -123,6 +123,41 @@ def _track_item(tr):
         "url": f"https://music.yandex.ru/album/{album_id}/track/{track_id}"
     }
 
+def _expand_playlist_tracks(client, raw):
+    entries = [getattr(entry, "track", None) or entry for entry in (raw or [])]
+    ids = []
+    for entry in entries:
+        value = getattr(entry, "track_id", None)
+        if value:
+            ids.append(str(value))
+        else:
+            track_id = getattr(entry, "id", None)
+            album_id = getattr(entry, "album_id", None)
+            if track_id and album_id:
+                ids.append(f"{track_id}:{album_id}")
+    expanded = {}
+    if ids:
+        try:
+            for track in (client.tracks(list(dict.fromkeys(ids))) or []):
+                albums = getattr(track, "albums", []) or []
+                album_id = getattr(albums[0], "id", None) if albums else None
+                if getattr(track, "id", None) and album_id:
+                    expanded[f"{track.id}:{album_id}"] = track
+        except Exception:
+            pass
+    result = []
+    for entry in entries:
+        value = getattr(entry, "track_id", None)
+        if value:
+            full = expanded.get(str(value))
+            if full: result.append(full); continue
+        item_id = getattr(entry, "id", None)
+        album_id = getattr(entry, "album_id", None)
+        full = expanded.get(f"{item_id}:{album_id}") if item_id and album_id else None
+        result.append(full or entry)
+    return result
+
+
 
 def _start_auth(s):
     if Client is None:
@@ -345,8 +380,7 @@ def api_user_playlist():
                 raw = playlist.fetch_tracks() or []
             title = getattr(playlist, "title", None) or "Плейлист"
         tracks = []
-        for entry in raw:
-            tr = getattr(entry, "track", None) or entry
+        for tr in _expand_playlist_tracks(client, raw):
             item = _track_item(tr)
             if item: tracks.append(item)
         if not tracks:
