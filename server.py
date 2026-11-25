@@ -109,8 +109,8 @@ def _cover_url(tr):
 
 def _track_item(tr):
     albums = getattr(tr, "albums", []) or []
-    album_id = getattr(albums[0], "id", None) if albums else None
-    track_id = getattr(tr, "id", None)
+    album_id = (getattr(albums[0], "id", None) if albums else None) or getattr(tr, "album_id", None)
+    track_id = getattr(tr, "id", None) or getattr(tr, "track_id", None)
     if not track_id or not album_id:
         return None
     artists = getattr(tr, "artists", []) or []
@@ -287,6 +287,73 @@ def api_playlist():
         return jsonify({"title": getattr(playlist, "title", None) or "Плейлист Яндекс Музыки", "id": playlist_id, "tracks": items})
     except Exception as exc:
         return api_error("Не удалось загрузить плейлист: " + str(exc)[:350], 502)
+
+
+@app.get("/api/user-playlists")
+def api_user_playlists():
+    s = state()
+    client = _get_client(s)
+    if not client: return api_error("Сначала войди в Яндекс.", 401)
+    try:
+        started = time.perf_counter()
+        items = []
+        for playlist in (client.users_playlists_list() or []):
+            uid = getattr(playlist, "uid", None)
+            kind = getattr(playlist, "kind", None)
+            if uid is None or kind is None: continue
+            items.append({
+                "id": f"{uid}:{kind}", "uid": str(uid), "kind": str(kind),
+                "title": getattr(playlist, "title", None) or "Плейлист",
+                "track_count": int(getattr(playlist, "track_count", 0) or 0),
+                "revision": getattr(playlist, "revision", None),
+            })
+        # The Likes collection is a special endpoint, not an ordinary user playlist.
+        liked = client.users_likes_tracks()
+        liked_tracks = getattr(liked, "tracks", None) or []
+        items.insert(0, {"id": "likes", "uid": "", "kind": "", "title": "Мне нравится",
+                         "track_count": len(liked_tracks), "is_likes": True})
+        return jsonify({"playlists": items, "timings": {
+            "total_ms": round((time.perf_counter() - started) * 1000)
+        }})
+    except Exception as exc:
+        return api_error("Не удалось загрузить плейлисты Яндекс Музыки: " + str(exc)[:350], 502)
+
+
+@app.get("/api/user-playlist")
+def api_user_playlist():
+    s = state()
+    client = _get_client(s)
+    if not client: return api_error("Сначала войди в Яндекс.", 401)
+    playlist_id = request.args.get("id", "")
+    try:
+        if playlist_id == "likes":
+            liked = client.users_likes_tracks()
+            raw = getattr(liked, "tracks", None) or []
+            title = "Мне нравится"
+        else:
+            uid = request.args.get("uid", "")
+            kind = request.args.get("kind", "")
+            if not uid.isdigit() or not kind.isdigit():
+                return api_error("Некорректный идентификатор плейлиста.")
+            playlists = client.users_playlists_list() or []
+            playlist = next((p for p in playlists
+                if str(getattr(p, "uid", "")) == uid and str(getattr(p, "kind", "")) == kind), None)
+            if playlist is None:
+                return api_error("Плейлист не найден в этом аккаунте.", 404)
+            raw = getattr(playlist, "tracks", None) or []
+            if not raw and hasattr(playlist, "fetch_tracks"):
+                raw = playlist.fetch_tracks() or []
+            title = getattr(playlist, "title", None) or "Плейлист"
+        tracks = []
+        for entry in raw:
+            tr = getattr(entry, "track", None) or entry
+            item = _track_item(tr)
+            if item: tracks.append(item)
+        if not tracks:
+            return jsonify({"title": title, "tracks": [], "message": "В этом плейлисте пока нет доступных треков."})
+        return jsonify({"title": title, "tracks": tracks})
+    except Exception as exc:
+        return api_error("Не удалось открыть плейлист: " + str(exc)[:350], 502)
 
 
 @app.get("/api/my-wave")
