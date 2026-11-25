@@ -124,39 +124,69 @@ def _track_item(tr):
     }
 
 def _expand_playlist_tracks(client, raw):
+    """Resolve Yandex TrackShort entries into full Track objects.
+
+    Prefer batched client.tracks() calls, then use TrackShort.fetch_track()
+    for entries that the batch response did not resolve.
+    """
     entries = [getattr(entry, "track", None) or entry for entry in (raw or [])]
-    requested = []
+    expanded = {}
+    requested_by_key = {}
     keys_by_entry = []
+
     for entry in entries:
         tid = getattr(entry, "track_id", None) or getattr(entry, "id", None)
+        albums = getattr(entry, "albums", None) or []
         aid = getattr(entry, "album_id", None)
-        if tid and aid:
-            requested.append(f"{tid}:{aid}")
-            keys_by_entry.append((str(tid), str(aid)))
-        elif tid:
-            requested.append(str(tid))
-            keys_by_entry.append((str(tid), ""))
-        else:
-            keys_by_entry.append(("", ""))
-    expanded = {}
-    if requested:
-        # The Yandex API accepts both track IDs and track:album IDs.
+        if not aid and albums:
+            aid = getattr(albums[0], "id", None)
+        tid = str(tid) if tid else ""
+        aid = str(aid) if aid else ""
+        keys_by_entry.append((tid, aid))
+        if tid:
+            key = f"{tid}:{aid}" if aid else tid
+            requested_by_key.setdefault(key, (tid, aid))
+
+        # Some playlist responses already contain a full Track object.
+        if tid and aid and albums and getattr(entry, "artists", None):
+            expanded[f"{tid}:{aid}"] = entry
+            expanded.setdefault(tid, entry)
+
+    requested = list(requested_by_key)
+    # Keep requests reasonably small; a very large likes collection can
+    # otherwise make the API request fail as a whole.
+    for offset in range(0, len(requested), 50):
+        batch = requested[offset:offset + 50]
         try:
-            full_tracks = client.tracks(list(dict.fromkeys(requested))) or []
-            for track in full_tracks:
-                tid = str(getattr(track, "id", "") or "")
-                albums = getattr(track, "albums", []) or []
-                aid = str(getattr(albums[0], "id", "") or "") if albums else ""
-                if tid:
-                    expanded[tid] = track
-                    if aid:
-                        expanded[f"{tid}:{aid}"] = track
+            full_tracks = client.tracks(batch) or []
         except Exception:
-            pass
+            full_tracks = []
+        for track in full_tracks:
+            tid = str(getattr(track, "id", "") or "")
+            albums = getattr(track, "albums", []) or []
+            aid = str(getattr(albums[0], "id", "") or "") if albums else ""
+            if tid:
+                expanded[tid] = track
+                if aid:
+                    expanded[f"{tid}:{aid}"] = track
+
     result = []
     for entry, (tid, aid) in zip(entries, keys_by_entry):
         full = expanded.get(f"{tid}:{aid}") if tid and aid else None
-        full = full or expanded.get(tid) if tid else None
+        full = full or (expanded.get(tid) if tid else None)
+
+        # The library documents fetch_track() as the canonical way to expand
+        # a TrackShort. Use it only when the batch lookup did not resolve it.
+        if full is None:
+            fetch_track = getattr(entry, "fetch_track", None)
+            if callable(fetch_track):
+                try:
+                    candidate = fetch_track()
+                    if candidate:
+                        full = candidate
+                except Exception:
+                    pass
+
         result.append(full or entry)
     return result
 
