@@ -300,3 +300,123 @@ body.collapsed #showSidebar.corner-menu{
  .search-dropdown{position:fixed!important;top:112px!important;left:12px!important;right:12px!important;width:auto!important;max-width:none!important;max-height:calc(100dvh - 128px)!important;overflow-y:auto!important;overscroll-behavior:contain}
  .search-results{max-height:none!important;overflow:visible!important}
 }
+
+/* Pulse Vinyl Web v1.1 */
+#sidebar{position:fixed!important;inset:0 auto 0 0!important;height:100vh!important;height:100dvh!important;min-height:0!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain;z-index:120!important}
+body:not(.collapsed) main{margin-left:238px!important}
+body.collapsed main{margin-left:0!important}
+#showSidebar{position:fixed!important;top:74px!important;left:238px!important;z-index:10001!important}
+body.collapsed #showSidebar{left:0!important;top:74px!important}
+@media(max-width:650px){body:not(.collapsed) main{margin-left:238px!important}body.collapsed main{margin-left:0!important}}
+.queue-tabs{display:flex;gap:7px;margin-bottom:14px;flex-wrap:wrap}
+.queue-tab{border:1px solid var(--line);border-radius:8px;background:#fff;color:#777b70;padding:9px 12px;font-size:10px;font-weight:800}
+.queue-tab.active{background:var(--accent);border-color:var(--accent);color:#222}
+.track-reactions{display:flex;gap:7px;flex:0 0 auto}
+.track-reactions button{width:36px;height:36px;border:1px solid var(--line);border-radius:50%;background:#fff;color:#777;font-size:17px}
+.track-reactions button.selected{background:var(--accent);border-color:var(--accent);color:#20221b}
+.auth-modal[hidden]{display:none!important}
+.auth-modal{position:fixed;inset:0;z-index:30000;display:grid;place-items:center;padding:24px;background:#17181566;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.auth-dialog{position:relative;width:min(920px,96vw);max-height:min(88dvh,850px);overflow:auto;background:#fbfcf9;border:1px solid #ffffffa0;border-radius:20px;padding:28px;box-shadow:0 28px 90px #0004}
+.auth-dialog h2{margin:0 0 8px;font-size:22px}
+.auth-dialog p{font-size:12px;color:#777b70;margin:0 0 18px}
+.auth-close{position:absolute;right:15px;top:12px;border:0;background:transparent;font-size:28px;color:#777}
+.auth-code-wrap-modal[hidden]{display:none!important}
+.auth-code-wrap-modal{margin-top:16px}
+.auth-split{display:grid;grid-template-columns:minmax(180px,.7fr) minmax(0,1.3fr);gap:18px;margin-top:14px;min-height:420px}
+.auth-code-instructions{font-size:12px;line-height:1.6;color:#777b70;padding:14px;background:#f1f3eb;border-radius:12px}
+.auth-frame-wrap{min-height:420px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
+.auth-frame-wrap iframe{width:100%;height:420px;border:0;background:#fff}
+.auth-dialog>a{display:inline-block;margin-top:12px;font-size:12px;color:#606b26}
+body.modal-open>main,body.modal-open>#sidebar,body.modal-open>#showSidebar{filter:blur(5px)}
+@media(max-width:700px){.auth-dialog{padding:20px 15px}.auth-split{grid-template-columns:1fr;min-height:0}.auth-frame-wrap,.auth-frame-wrap iframe{height:420px;min-height:420px}.track-reactions button{width:32px;height:32px}}
+
+
+/* v1.1.1: pin the corner toggle to the viewport, not the scrolling sidebar */
+#showSidebar{position:fixed!important;top:12px!important;left:238px!important;right:auto!important;bottom:auto!important;transform:none!important;z-index:10050!important}
+body.collapsed #showSidebar{left:10px!important;top:12px!important}
+.auth-popup-note{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#777b70;text-align:center;padding:20px}
+.auth-popup-icon{font-size:42px;color:#8da900}
+.auth-popup-note strong{color:#303329;font-size:14px}
+.auth-popup-note span{font-size:11px}
+body[data-theme="dark"] .auth-popup-note strong{color:#eef0e8}
+
+/* In PiP authorization flow, keep the legacy split-code panel out of the modal. */
+#authCodeWrapModal{display:none!important}
+
+
+/* Pulsar Web v1.1.1 — identity, blue night theme and fixed corner control */
+#showSidebar.corner-menu{position:fixed!important;top:8px!important;left:238px!important;right:auto!important;bottom:auto!important;z-index:10050!important}
+body.collapsed #showSidebar.corner-menu{left:10px!important;top:8px!important}
+body[data-theme="dark"]{--accent:#398cff;--ink:#edf4ff;--muted:#a6b8d0;--line:#263a55;--paper:#0d1420;background:#0d1420;color:#edf4ff;color-scheme:dark}
+body[data-theme="dark"] #sidebar{background:#111c2b;border-color:#263a55}
+body[data-theme="dark"] header{background:#111c2b;border-color:#263a55}
+body[data-theme="dark"] .nav{color:#b6c7dc}
+body[data-theme="dark"] .nav.active{background:#1c3554;color:#f2f7ff}
+body[data-theme="dark"] .iconbtn,body[data-theme="dark"] .theme-toggle,body[data-theme="dark"] .change-viz,body[data-theme="dark"] .viz-picker,body[data-theme="dark"] .add-card,body[data-theme="dark"] .queue-card{background:#15243a;color:#edf4ff;border-color:#2a4568}
+body[data-theme="dark"] .queue-tab{background:#1a2a41;color:#d7e6fa;border-color:#355273}
+body[data-theme="dark"] .queue-tab.active{background:#398cff;color:#fff;border-color:#398cff}
+body[data-theme="dark"] .track-reactions button{background:#1a2a41;color:#c8dcf5;border-color:#355273}
+body[data-theme="dark"] .track-reactions button.selected{background:#398cff;color:#fff;border-color:#398cff}
+body[data-theme="dark"] .queue-index{background:#203753;color:#d7e6fa}
+body[data-theme="dark"] .queue-item{border-color:#263a55}
+body[data-theme="dark"] .result-actions button{background:#1a2a41;color:#edf4ff;border-color:#355273}
+body[data-theme="dark"] .turntable{background:linear-gradient(145deg,#34465b 0%,#17283d 48%,#2a3d55 100%);border-color:#526b86}
+body[data-theme="dark"] .deck-logo{color:#d9eaff;text-shadow:0 1px 2px #07101d}
+body[data-theme="dark"] .deck-logo:after{color:#a8c4e6;text-shadow:0 1px 2px #07101d}
+body[data-theme="dark"] .control.primary,body[data-theme="dark"] .header-search button{background:#398cff!important;color:#fff!important;box-shadow:0 3px 0 #1d5da7!important}
+body[data-theme="dark"] .control.primary:hover,body[data-theme="dark"] .header-search button:hover{background:#57a0ff!important}
+body[data-theme="dark"] .queue-tab.active{color:#fff}
+.record-ring-text{position:absolute;inset:0;width:100%;height:100%;z-index:3;overflow:visible;pointer-events:none;transform:rotate(-90deg)}
+.record-ring-text text{fill:#e7e9df;font-family:Arial,sans-serif;font-size:13px;font-weight:800;letter-spacing:2.4px;text-transform:uppercase;paint-order:stroke;stroke:#10110e;stroke-width:2px;stroke-linejoin:round}
+.label{overflow:hidden}
+.label img{width:100%;height:100%;display:block;object-fit:cover;border-radius:50%}
+.label img[hidden]{display:none}
+.label .spindle{z-index:4}
+body[data-theme="dark"] .record-ring-text text{fill:#eaf2ff;stroke:#070e18}
+body[data-theme="dark"] .record{background:radial-gradient(circle,#253c56 0 20%,#101b2b 21% 100%)}
+body[data-theme="dark"] .label{background:#1a2b42;border-color:#7d9bbd}
+body[data-theme="dark"] .side-section-label{color:#8da8c8}
+body[data-theme="dark"] .auth-status{color:#a9bfdc}
+.control.primary{display:grid;place-items:center;line-height:1;padding:0}
+.header-search button{display:grid;place-items:center;line-height:1;padding:0}
+
+body[data-theme="dark"] .iconbtn:hover,
+body[data-theme="dark"] .theme-toggle:hover,
+body[data-theme="dark"] .change-viz:hover,
+body[data-theme="dark"] #showSidebar:hover{background:#398cff!important;color:#fff!important}
+body[data-theme="dark"] .pulse{background:#398cff;box-shadow:0 0 0 4px #398cff35}
+body[data-theme="dark"] input[type="range"]{accent-color:#398cff}
+body[data-theme="dark"] .add-form button,
+body[data-theme="dark"] .search-form button,
+body[data-theme="dark"] .choose-viz{background:#398cff;color:#fff}
+.record-ring-text text{font-size:12px;letter-spacing:1.8px}
+.record-ring-text textPath{dominant-baseline:middle}
+
+/* Pulsar v1.1.1 follow-up: anchor visualizer controls to its frame. */
+.visual-stage{position:relative}
+.viz-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:8}
+.viz-arrow:hover{transform:translateY(-50%) scale(1.06)}
+.viz-arrow-prev{left:14px;right:auto}
+.viz-arrow-next{right:14px;left:auto}
+.record-ring-text text{font-size:18px;letter-spacing:1.4px}
+.label{overflow:hidden}
+.label img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;z-index:2}
+.label img[hidden]{display:none}
+.label .spindle{z-index:4}
+
+/* Pulsar dark-theme refinement */
+body[data-theme="dark"] .queue-item:hover{background:#303b48!important}
+body[data-theme="dark"] .auth-dialog{background:#1d2632;color:#edf4ff;border-color:#405064;box-shadow:0 28px 90px #0009}
+body[data-theme="dark"] .auth-dialog p,body[data-theme="dark"] .auth-code-instructions{color:#b4c2d2}
+body[data-theme="dark"] .auth-code-instructions{background:#263444}
+body[data-theme="dark"] .auth-code-wrap-modal,body[data-theme="dark"] .auth-code-row,body[data-theme="dark"] .auth-dialog input{background:#17212c;color:#edf4ff;border-color:#405064}
+body[data-theme="dark"] .auth-close{color:#c5d4e5}
+body[data-theme="dark"] .auth-start,body[data-theme="dark"] .auth-code-row button{background:#3688e8;color:#fff;border-color:#3688e8}
+body[data-theme="dark"] .auth-frame-wrap{background:#17212c;border-color:#405064}
+body[data-theme="dark"] .viz-arrow{background:#172638e8;border-color:#52749b;color:#eaf3ff}
+body[data-theme="dark"] .viz-arrow:hover{background:#3688e8!important;color:#fff!important;border-color:#3688e8;box-shadow:0 0 0 3px #3688e833,0 8px 28px #0005}
+.visual-stage{position:relative;overflow:visible}
+.visual-stage .viz-arrow{position:absolute!important;top:50%!important;transform:translateY(-50%)!important;z-index:30}
+.visual-stage .viz-arrow-prev{left:12px!important;right:auto!important}
+.visual-stage .viz-arrow-next{right:12px!important;left:auto!important}
+.visual-stage .viz-arrow:hover{transform:translateY(-50%) scale(1.06)!important}

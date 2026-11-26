@@ -1,5 +1,5 @@
 import butterchurn from './vendor/butterchurn/butterchurn.min.js?v=10.9.1';
-/* Pulse Vinyl v10 — local Butterchurn runtime + Noisemaker shader runtime. */
+/* Pulsar v10 — local Butterchurn runtime + Noisemaker shader runtime. */
 const SHADER_CDN = 'https://shaders.noisedeck.app/1';
 const PRESET_MANIFEST_URL = './presets/butterchurn/manifest.json';
 const $ = id => document.getElementById(id);
@@ -26,7 +26,7 @@ noise(octaves: 7, scaleX: audio(band: audioBand.low, min: 7, max: 22), scaleY: a
 render(o0)`
 };
 function describeError(err){if(err==null)return 'неизвестная ошибка';if(typeof err==='string')return err;if(err.message)return err.message;try{return JSON.stringify(err)}catch{return String(err)}}
-function setError(message, error=null) { const isNew=message!==lastError; lastError = message; if(isNew){console.warn('[Pulse Vinyl visualizers]', message); if(error){console.error('[Pulse Vinyl visualizers] Полная диагностика:', {stage:bcStage, name:error.name||'Error', message:error.message||String(error), stack:error.stack||'(stack отсутствует)', cause:error.cause||null, causeStack:error.cause?.stack||null, error});}} const hint=$('vizHint'); if(hint) hint.textContent = message; }
+function setError(message, error=null) { const isNew=message!==lastError; lastError = message; if(isNew){console.warn('[Pulsar visualizers]', message); if(error){console.error('[Pulsar visualizers] Полная диагностика:', {stage:bcStage, name:error.name||'Error', message:error.message||String(error), stack:error.stack||'(stack отсутствует)', cause:error.cause||null, causeStack:error.cause?.stack||null, error});}} const hint=$('vizHint'); if(hint) hint.textContent = message; }
 function resizeCanvas(canvas,w,h){const dpr=Math.min(devicePixelRatio||1,1.6);const W=Math.max(1,Math.round(w*dpr)),H=Math.max(1,Math.round(h*dpr));if(canvas.width!==W||canvas.height!==H){canvas.width=W;canvas.height=H;}return {width:W,height:H};}
 async function loadButterchurn(){
  bcStage='1/6: проверка локальной библиотеки';
@@ -89,7 +89,7 @@ async function startButterchurn({ctx,source,analyser,width,height,presetId}){
   bcActivePreset=presetId;
   const hint=$('vizHint');
   const entry=bcManifest?.find(x=>x.id===presetId);
-  if(hint&&entry)hint.textContent=`Butterchurn · ${entry.name}`;
+  if(hint&&entry)hint.textContent=`${$('vizTitle')?.textContent||'Визуализатор'} готов`;
  }
  bcStage='6/6: отрисовка кадра';
  try{bcInstance.render()}catch(e){throw new Error(`render() завершился ошибкой: ${e?.message||e}`,{cause:e})}
@@ -206,6 +206,7 @@ async function update(payload){
  }catch(e){if(selected.startsWith('butterchurn-'))bcLoadError=e;const prefix=selected.startsWith('butterchurn-')?`Butterchurn [${bcStage}]`:'Noisemaker';setError(`${prefix}: ${e?.message||e}. Полная ошибка — F12 → Console (красная запись «Полная диагностика»).`,e)}
  finally{loading=false;}
 }
+async function prepare(payload,presetId){if(!presetId?.startsWith('butterchurn-'))return; if(loading)return;loading=true;try{await startButterchurn({...payload,presetId})}catch(e){bcLoadError=e;setError('Предварительная подготовка Butterchurn: '+(e?.message||e),e)}finally{loading=false}}
 function stopIfInactive(mode){if(!String(mode).startsWith('butterchurn-')&& !String(mode).startsWith('noisemaker-')){try{nmRenderer?.stop?.()}catch{};nmMode='';}}
-function select(mode){selected=mode;lastError='';if(mode.startsWith('butterchurn-'))bcLoadError=null;if(mode.startsWith('butterchurn-')||mode.startsWith('noisemaker-')){const hint=$('vizHint');if(hint&&!lastError)hint.textContent=mode.startsWith('butterchurn-')?'Загружаю MilkDrop-сцену Butterchurn…':'Загружаю GPU-шейдер Noisemaker…';}else{try{nmRenderer?.stop?.()}catch{};nmMode='';}}
-window.PulseEngines={select,update,stopIfInactive,getStatus:()=>({butterchurn:!!bcInstance,butterchurnStage:bcStage,butterchurnError:bcLoadError?{name:bcLoadError.name,message:bcLoadError.message,stack:bcLoadError.stack}:null,noisemaker:!!nmRenderer,noisemakerMode:nmMode,noisemakerBackend:nmBackend,lastError,canvasSize:{butterchurn:bcCanvas?`${bcCanvas.width}x${bcCanvas.height}`:null,noisemaker:nmCanvas?`${nmCanvas.width}x${nmCanvas.height}`:null},webgl2:checkWebGL2()})};
+function select(mode){selected=mode;lastError='';if(mode.startsWith('butterchurn-')){loadButterchurnPreset(mode).then(()=>{const h=$('vizHint');if(h&&selected===mode)h.textContent='Визуализатор готов к работе'}).catch(e=>setError('Не удалось заранее загрузить MilkDrop-пресет: '+describeError(e),e))}if(mode.startsWith('butterchurn-'))bcLoadError=null;if(mode.startsWith('butterchurn-')||mode.startsWith('noisemaker-')){const hint=$('vizHint');if(hint&&!lastError)hint.textContent='Загружаю визуализатор…';}else{try{nmRenderer?.stop?.()}catch{};nmMode='';}}
+window.PulsarEngines={select,update,prepare,stopIfInactive,getStatus:()=>({butterchurn:!!bcInstance,butterchurnStage:bcStage,butterchurnError:bcLoadError?{name:bcLoadError.name,message:bcLoadError.message,stack:bcLoadError.stack}:null,noisemaker:!!nmRenderer,noisemakerMode:nmMode,noisemakerBackend:nmBackend,lastError,canvasSize:{butterchurn:bcCanvas?`${bcCanvas.width}x${bcCanvas.height}`:null,noisemaker:nmCanvas?`${nmCanvas.width}x${nmCanvas.height}`:null},webgl2:checkWebGL2()})};

@@ -1,9 +1,10 @@
-"""Pulse Vinyl Web v1 — multi-user web backend.
+"""Pulsar Web v1 — multi-user web backend.
 
 Each browser receives an opaque, HttpOnly session cookie. Yandex clients,
 authentication state, jobs and audio cache are isolated per session.
 """
 import json
+from concurrent.futures import ThreadPoolExecutor
 import os
 import re
 import secrets
@@ -17,7 +18,7 @@ from urllib.parse import urlparse
 from flask import Flask, jsonify, request, send_from_directory, make_response, abort
 
 ROOT = Path(__file__).resolve().parent
-DATA_ROOT = Path(os.environ.get("PULSE_DATA_DIR", "/tmp/pulse-vinyl"))
+DATA_ROOT = Path(os.environ.get("PULSE_DATA_DIR", "/tmp/pulsar"))
 CACHE_ROOT = DATA_ROOT / "cache"
 CACHE_ROOT.mkdir(parents=True, exist_ok=True)
 SESSION_TTL = int(os.environ.get("PULSE_SESSION_TTL", "43200"))
@@ -37,7 +38,7 @@ except Exception:
 def _new_session():
     return {
         "client": None, "auth": "idle", "auth_url": "", "auth_code": "",
-        "auth_error": "", "jobs": {}, "last_seen": time.time(),
+        "auth_error": "", "auth_generation": 0, "jobs": {}, "last_seen": time.time(),
         "lock": threading.RLock(), "cache_dir": None,
     }
 
@@ -95,23 +96,135 @@ def api_error(message, status=400):
     return jsonify({"error": str(message)[:500]}), status
 
 
+def _cover_url(tr):
+    albums = getattr(tr, "albums", []) or []
+    artists = getattr(tr, "artists", []) or []
+    uri = (getattr(albums[0], "cover_uri", None) if albums else None)
+    if not uri and artists:
+        artist_cover = getattr(artists[0], "cover", None)
+        uri = getattr(artist_cover, "uri", None) or getattr(artists[0], "cover_uri", None)
+    if not uri:
+        return ""
+    return "https://" + str(uri).removeprefix("https://").removeprefix("http://").replace("%%", "400x400")
+
+
 def _track_item(tr):
     albums = getattr(tr, "albums", []) or []
-    album_id = getattr(albums[0], "id", None) if albums else None
-    track_id = getattr(tr, "id", None)
+    album_id = (getattr(albums[0], "id", None) if albums else None) or getattr(tr, "album_id", None)
+    track_id = getattr(tr, "id", None) or getattr(tr, "track_id", None)
     if not track_id or not album_id:
         return None
     artists = getattr(tr, "artists", []) or []
     artist = ", ".join(getattr(a, "name", "") for a in artists if getattr(a, "name", None)) or "Исполнитель не определён"
-    cover = getattr(tr, "cover_uri", None) or ""
-    if cover:
-        cover = "https://" + cover.removeprefix("https://").removeprefix("http://").replace("%%", "400x400")
+    cover = _cover_url(tr)
     return {
         "id": f"{track_id}:{album_id}", "track_id": str(track_id), "album_id": str(album_id),
         "title": getattr(tr, "title", None) or "Неизвестный трек", "artist": artist,
         "duration": getattr(tr, "duration_ms", 0) or 0, "cover": cover,
         "url": f"https://music.yandex.ru/album/{album_id}/track/{track_id}"
     }
+
+def _expand_playlist_tracks(client, raw, diagnostics=None):
+    """Resolve Yandex TrackShort entries into full Track objects.
+
+    Prefer batched client.tracks() calls, then use TrackShort.fetch_track()
+    for entries that the batch response did not resolve.
+    """
+    started = time.perf_counter()
+    entries = [getattr(entry, "track", None) or entry for entry in (raw or [])]
+    if diagnostics is not None:
+        diagnostics.update({"raw_entries": len(entries), "unique_track_ids": 0, "batch_count": 0, "batch_seconds": 0.0, "batch_resolved": 0, "fallback_count": 0, "fallback_seconds": 0.0})
+    expanded = {}
+    requested_by_key = {}
+    keys_by_entry = []
+
+    for entry in entries:
+        # TrackShort.track_id already contains "id:album_id". Keep the
+        # numeric/string track id and album id separate to avoid building
+        # the invalid "id:album_id:album_id" request key.
+        tid = getattr(entry, "id", None)
+        albums = getattr(entry, "albums", None) or []
+        aid = getattr(entry, "album_id", None)
+        if not tid:
+            raw_track_id = getattr(entry, "track_id", None)
+            if raw_track_id:
+                tid = str(raw_track_id).split(":", 1)[0]
+        if not aid and albums:
+            aid = getattr(albums[0], "id", None)
+        tid = str(tid) if tid else ""
+        aid = str(aid) if aid else ""
+        keys_by_entry.append((tid, aid))
+        if tid:
+            key = f"{tid}:{aid}" if aid else tid
+            requested_by_key.setdefault(key, (tid, aid))
+
+        # Some playlist responses already contain a full Track object.
+        if tid and aid and albums and getattr(entry, "artists", None):
+            expanded[f"{tid}:{aid}"] = entry
+            expanded.setdefault(tid, entry)
+
+    requested = list(requested_by_key)
+    if diagnostics is not None:
+        diagnostics["unique_track_ids"] = len(requested)
+    # Keep requests reasonably small; a very large likes collection can
+    # otherwise make the API request fail as a whole.
+    batch_started = time.perf_counter()
+    for offset in range(0, len(requested), 50):
+        batch = requested[offset:offset + 50]
+        if diagnostics is not None:
+            diagnostics["batch_count"] += 1
+        try:
+            full_tracks = client.tracks(batch) or []
+        except Exception:
+            full_tracks = []
+        for track in full_tracks:
+            tid = str(getattr(track, "id", "") or "")
+            albums = getattr(track, "albums", []) or []
+            aid = str(getattr(albums[0], "id", "") or "") if albums else ""
+            if tid:
+                expanded[tid] = track
+                if aid:
+                    expanded[f"{tid}:{aid}"] = track
+
+    if diagnostics is not None:
+        diagnostics["batch_seconds"] = round(time.perf_counter() - batch_started, 3)
+        diagnostics["batch_resolved"] = sum(1 for tid, aid in keys_by_entry if (expanded.get(f"{tid}:{aid}") if tid and aid else None) or (expanded.get(tid) if tid else None))
+
+    # Resolve only entries missed by the batch lookup using a bounded pool.
+    missing = []
+    result = []
+    for entry, (tid, aid) in zip(entries, keys_by_entry):
+        full = expanded.get(f"{tid}:{aid}") if tid and aid else None
+        full = full or (expanded.get(tid) if tid else None)
+        if full is not None:
+            result.append(full)
+        else:
+            index = len(result)
+            result.append(None)
+            missing.append((index, entry))
+
+    def fetch_one(item):
+        index, entry = item
+        fetch_track = getattr(entry, "fetch_track", None)
+        if not callable(fetch_track):
+            return index, entry
+        try:
+            candidate = fetch_track()
+            return index, candidate or entry
+        except Exception:
+            return index, entry
+
+    fallback_started = time.perf_counter()
+    if missing:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for index, resolved in pool.map(fetch_one, missing):
+                result[index] = resolved
+
+    if diagnostics is not None:
+        diagnostics["fallback_count"] = len(missing)
+        diagnostics["fallback_seconds"] = round(time.perf_counter() - fallback_started, 3)
+        diagnostics["expand_seconds"] = round(time.perf_counter() - started, 3)
+    return [track or entry for track, entry in zip(result, entries)]
 
 
 def _start_auth(s):
@@ -122,10 +235,14 @@ def _start_auth(s):
     with s["lock"]:
         if s["auth"] == "pending":
             return
+        s["auth_generation"] += 1
+        generation = s["auth_generation"]
         s.update(auth="pending", auth_url="", auth_code="", auth_error="", client=None)
 
     def on_code(code):
         with s["lock"]:
+            if s["auth_generation"] != generation or s["auth"] != "pending":
+                return
             s["auth_url"] = code.verification_url
             s["auth_code"] = code.user_code
 
@@ -135,11 +252,15 @@ def _start_auth(s):
             token = client.device_auth(on_code=on_code)
             client = Client(token.access_token).init()
             with s["lock"]:
+                if s["auth_generation"] != generation or s["auth"] != "pending":
+                    return
                 s["client"] = client
                 s["auth"] = "ready"
                 s["auth_error"] = ""
         except Exception as exc:
             with s["lock"]:
+                if s["auth_generation"] != generation or s["auth"] != "pending":
+                    return
                 s["auth"] = "error"
                 s["auth_error"] = str(exc)[:450]
     threading.Thread(target=worker, daemon=True).start()
@@ -160,7 +281,7 @@ def _valid_yandex_url(url):
 
 @app.get("/health")
 def health():
-    return jsonify({"ok": True, "service": "Pulse Vinyl Web"})
+    return jsonify({"ok": True, "service": "Pulsar Web"})
 
 
 @app.get("/")
@@ -201,6 +322,7 @@ def api_logout():
     s = state()
     with s["lock"]:
         s.update(client=None, auth="idle", auth_url="", auth_code="", auth_error="", jobs={})
+        s["auth_generation"] += 1
     # Remove only this browser's temporary cache.
     if s["cache_dir"]:
         shutil.rmtree(s["cache_dir"], ignore_errors=True)
@@ -270,6 +392,83 @@ def api_playlist():
         return api_error("Не удалось загрузить плейлист: " + str(exc)[:350], 502)
 
 
+@app.get("/api/user-playlists")
+def api_user_playlists():
+    s = state()
+    client = _get_client(s)
+    if not client: return api_error("Сначала войди в Яндекс.", 401)
+    try:
+        started = time.perf_counter()
+        items = []
+        for playlist in (client.users_playlists_list() or []):
+            uid = getattr(playlist, "uid", None)
+            kind = getattr(playlist, "kind", None)
+            if uid is None or kind is None: continue
+            items.append({
+                "id": f"{uid}:{kind}", "uid": str(uid), "kind": str(kind),
+                "title": getattr(playlist, "title", None) or "Плейлист",
+                "track_count": int(getattr(playlist, "track_count", 0) or 0),
+                "revision": getattr(playlist, "revision", None),
+            })
+        # The Likes collection is a special endpoint, not an ordinary user playlist.
+        liked = client.users_likes_tracks()
+        liked_tracks = getattr(liked, "tracks", None) or []
+        items.insert(0, {"id": "likes", "uid": "", "kind": "", "title": "Мне нравится",
+                         "track_count": len(liked_tracks), "is_likes": True})
+        return jsonify({"playlists": items, "timings": {
+            "total_ms": round((time.perf_counter() - started) * 1000)
+        }})
+    except Exception as exc:
+        return api_error("Не удалось загрузить плейлисты Яндекс Музыки: " + str(exc)[:350], 502)
+
+
+@app.get("/api/user-playlist")
+def api_user_playlist():
+    s = state()
+    client = _get_client(s)
+    if not client: return api_error("Сначала войди в Яндекс.", 401)
+    playlist_id = request.args.get("id", "")
+    diagnostics = {"playlist_fetch_seconds": 0.0, "serialization_seconds": 0.0}
+    request_started = time.perf_counter()
+    try:
+        playlist_started = time.perf_counter()
+        if playlist_id == "likes":
+            liked = client.users_likes_tracks()
+            raw = getattr(liked, "tracks", None) or []
+            title = "Мне нравится"
+        else:
+            uid = request.args.get("uid", "")
+            kind = request.args.get("kind", "")
+            if not uid.isdigit() or not kind.isdigit():
+                return api_error("Некорректный идентификатор плейлиста.")
+            playlists = client.users_playlists_list() or []
+            playlist = next((p for p in playlists
+                if str(getattr(p, "uid", "")) == uid and str(getattr(p, "kind", "")) == kind), None)
+            if playlist is None:
+                return api_error("Плейлист не найден в этом аккаунте.", 404)
+            raw = getattr(playlist, "tracks", None) or []
+            if not raw and hasattr(playlist, "fetch_tracks"):
+                raw = playlist.fetch_tracks() or []
+            title = getattr(playlist, "title", None) or "Плейлист"
+        diagnostics["playlist_fetch_seconds"] = round(time.perf_counter() - playlist_started, 3)
+        expand_diagnostics = {}
+        expanded_tracks = _expand_playlist_tracks(client, raw, expand_diagnostics)
+        serialization_started = time.perf_counter()
+        tracks = []
+        for tr in expanded_tracks:
+            item = _track_item(tr)
+            if item: tracks.append(item)
+        diagnostics.update(expand_diagnostics)
+        diagnostics["serialization_seconds"] = round(time.perf_counter() - serialization_started, 3)
+        diagnostics["total_seconds"] = round(time.perf_counter() - request_started, 3)
+        diagnostics["serialized_tracks"] = len(tracks)
+        if not tracks:
+            return jsonify({"title": title, "tracks": [], "message": "В этом плейлисте пока нет доступных треков.", "diagnostics": diagnostics})
+        return jsonify({"title": title, "tracks": tracks, "diagnostics": diagnostics})
+    except Exception as exc:
+        return api_error("Не удалось открыть плейлист: " + str(exc)[:350], 502)
+
+
 @app.get("/api/my-wave")
 def api_my_wave():
     client = _get_client(state())
@@ -312,10 +511,31 @@ def api_resolve():
         tracks = client.tracks([f"{track}:{album}"])
         if not tracks: raise RuntimeError("Яндекс не вернул этот трек.")
         item = _track_item(tracks[0]) or {}
-        item.pop("cover", None)
         return jsonify(item)
     except Exception as exc:
         return api_error("Не удалось получить данные трека: " + str(exc)[:350], 502)
+
+
+@app.post("/api/track-reaction")
+def api_track_reaction():
+    payload = request.get_json(silent=True) or {}
+    track_id = str(payload.get("track_id", "")).strip()
+    action = payload.get("action")
+    if not track_id.isdigit() or action not in ("like", "dislike"):
+        return api_error("Некорректный идентификатор трека или действие.")
+    client = _get_client(state())
+    if not client:
+        return api_error("Сначала войди в Яндекс.", 401)
+    try:
+        if action == "like":
+            ok = client.users_likes_tracks_add(track_id)
+        else:
+            ok = client.users_dislikes_tracks_add(track_id)
+        if not ok:
+            raise RuntimeError("Яндекс не подтвердил изменение оценки.")
+        return jsonify({"ok": True, "action": action})
+    except Exception as exc:
+        return api_error("Яндекс не принял оценку: " + str(exc)[:300], 502)
 
 
 @app.get("/api/track")
@@ -370,7 +590,7 @@ def api_track():
                     "file_size_bytes": filename.stat().st_size,
                 }
                 with s["lock"]:
-                    s["jobs"][job_id].update(status="done", progress="Трек готов", result={"title": title, "artist": artist, "duration": duration, "src": f"/api/audio/{track}_{album}.mp3", "id": f"{track}:{album}"}, timings=timings, updated=time.time())
+                    s["jobs"][job_id].update(status="done", progress="Трек готов", result={"title": title, "artist": artist, "duration": duration, "cover": _cover_url(full), "src": f"/api/audio/{track}_{album}.mp3", "id": f"{track}:{album}"}, timings=timings, updated=time.time())
                 return
             except Exception as exc:
                 last_error = str(exc)
