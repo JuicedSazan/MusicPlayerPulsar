@@ -139,9 +139,16 @@ def _expand_playlist_tracks(client, raw, diagnostics=None):
     keys_by_entry = []
 
     for entry in entries:
-        tid = getattr(entry, "track_id", None) or getattr(entry, "id", None)
+        # TrackShort.track_id already contains "id:album_id". Keep the
+        # numeric/string track id and album id separate to avoid building
+        # the invalid "id:album_id:album_id" request key.
+        tid = getattr(entry, "id", None)
         albums = getattr(entry, "albums", None) or []
         aid = getattr(entry, "album_id", None)
+        if not tid:
+            raw_track_id = getattr(entry, "track_id", None)
+            if raw_track_id:
+                tid = str(raw_track_id).split(":", 1)[0]
         if not aid and albums:
             aid = getattr(albums[0], "id", None)
         tid = str(tid) if tid else ""
