@@ -496,3 +496,17 @@ body[data-theme="dark"] .viz-option.active{background:#1c3554;border-color:#398c
 body[data-theme="dark"] .viz-options::-webkit-scrollbar-thumb{background:#405a77}
 #showSidebar.corner-menu{border-radius:0 0 16px 0!important}
 body.collapsed #showSidebar.corner-menu{border-radius:0 0 16px 0!important}
+
+/* Compact dropdown anchored to the visualizer button */
+.viz-picker-row{justify-content:flex-start;position:relative;z-index:12}
+.viz-picker-anchor{position:relative;flex:0 0 auto}
+.viz-picker{position:absolute;top:calc(100% + 8px);left:0;width:min(320px,calc(100vw - 36px));max-width:none;margin:0;padding:8px;border:1px solid #dce2eb;border-radius:12px;background:#fff;display:block;box-shadow:0 14px 36px #10182824}
+.viz-options{max-height:260px;min-height:0}
+.viz-picker[hidden]{display:none!important}
+.viz-picker-name,.choose-viz{display:none!important}
+.viz-option{padding:10px 12px}
+@media(max-width:650px){.viz-picker-row{flex-direction:row;align-items:center}.viz-hint{max-width:48%;text-align:right}.viz-picker{width:min(300px,calc(100vw - 28px))}}
+body[data-theme="dark"] .viz-picker{background:#111d2d;border-color:#29415f;box-shadow:0 14px 36px #0008}
+body[data-theme="dark"] .viz-option{color:#dceaff;border-color:#2b4565}
+body[data-theme="dark"] .viz-option:hover{background:#1b3452;border-color:#398cff}
+body[data-theme="dark"] .viz-option.active{background:#203f66;border-color:#398cff;color:#fff}
