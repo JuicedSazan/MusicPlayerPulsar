@@ -434,7 +434,7 @@ def api_vk_web_token_probe():
     cookie_p = str(payload.get("p") or "").strip()
     if not remixsid:
         return api_error("Нужна cookie remixsid с vk.ru.")
-    if any(c in remixsid + cookie_p for c in "\\r\\n;") or len(remixsid) > 10000 or len(cookie_p) > 10000:
+    if any(c in remixsid + cookie_p for c in "\r\n;") or len(remixsid) > 10000 or len(cookie_p) > 10000:
         return api_error("Некорректный формат cookie.")
 
     import urllib.parse
