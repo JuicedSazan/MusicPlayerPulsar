@@ -965,10 +965,9 @@ def api_vk_audio():
     if not re.fullmatch(r"-?\d+", owner_id) or not re.fullmatch(r"\d+", track_id):
         return api_error("Некорректный идентификатор VK-трека.")
     s = state()
-    with s["lock"]:
-        service = s.get("vk_service")
+    service, refresh_error = _ensure_vk_service(s)
     if not service:
-        return api_error("VK Music не подключена в этой сессии.", 401)
+        return api_error(refresh_error or "VK Music не подключена в этой сессии.", 401)
     try:
         songs = service.get_songs_by_id([owner_id + "_" + track_id]) or []
         song = next((x for x in songs if getattr(x, "url", None)), None)
