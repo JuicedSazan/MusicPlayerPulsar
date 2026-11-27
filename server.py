@@ -411,7 +411,7 @@ def api_vk_id_probe():
                 result["recommendations_count"] = len(recommended)
             except Exception as exc:
                 result["details"].append("recommendations: " + str(exc)[:220])
-        if result["audio_search"]:
+        if result["audio_search"] and user_id:
             session = state()
             with session["lock"]:
                 session["vk_service"] = service
