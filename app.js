@@ -222,10 +222,19 @@ checkAuth();
  let vkAccessToken='',vkRefreshToken='',vkDeviceId='';
  const randomString=(length)=>{const alphabet='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-';const bytes=new Uint8Array(length);crypto.getRandomValues(bytes);return Array.from(bytes,b=>alphabet[b%alphabet.length]).join('')};
  const vkDiagnostics=[];
+ let vkDiagPanel=null,vkDiagOutput=null;
  const vkDiag=(step,details={})=>{
   const entry={time:new Date().toISOString(),step,details};
   vkDiagnostics.push(entry);if(vkDiagnostics.length>100)vkDiagnostics.shift();
   console.info('[PULSAR VK DIAG]',entry);window.__pulsarVkDiagnostics=vkDiagnostics;
+  if(!vkDiagPanel){
+   vkDiagPanel=document.createElement('details');vkDiagPanel.id='vkDiagnosticsPanel';
+   vkDiagPanel.style.cssText='margin:8px 0;font:11px/1.4 Arial,sans-serif;color:inherit';
+   const summary=document.createElement('summary');summary.textContent='Диагностика VK ID';summary.style.cursor='pointer';
+   vkDiagOutput=document.createElement('pre');vkDiagOutput.style.cssText='max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.4 Consolas,monospace;background:rgba(127,127,127,.08);padding:7px;border-radius:6px';
+   vkDiagPanel.append(summary,vkDiagOutput);(button.closest('.sidebar-bottom')||status.parentElement).appendChild(vkDiagPanel);
+  }
+  vkDiagOutput.textContent=vkDiagnostics.slice(-35).map(item=>item.time.slice(11,23)+' '+item.step+' '+JSON.stringify(item.details)).join('\\n');
  };
  vkDiag('VK_DIAGNOSTICS_STARTED',{href:location.href,origin:location.origin,readyState:document.readyState,pipSupported:!!window.documentPictureInPicture?.requestWindow,broadcastChannelSupported:typeof BroadcastChannel==='function',sdkPresent:!!window.VKIDSDK});
 
@@ -335,6 +344,13 @@ checkAuth();
     .brand{font-size:11px;letter-spacing:2px;font-weight:800;color:#29496d;padding:18px 20px 10px}
     iframe{display:block;width:100%;height:365px;border:0;background:#f5f7fb}.diag{height:105px;overflow:auto;border-top:1px solid #dce3ed;padding:7px 12px;background:#fff;color:#34445b;font:10px/1.4 Consolas,monospace;white-space:pre-wrap}
    </style><div class="brand">PULSAR / VK ID</div><iframe id="vkAuthFrame" title="Авторизация VK ID" allow="publickey-credentials-get"></iframe><div id="vkDiag" class="diag">[00] PiP создан. Ожидаем iframe…</div>`;
+   w.addEventListener('message',event=>{
+    if(event.source!==frame.contentWindow)return;
+    const data=event.data;if(data?.type!=='PULSAR_VK_DIAG')return;
+    const line='[AUTH] '+data.step+' '+JSON.stringify(data.details||{});
+    diagBox.textContent+='\\n'+line;diagBox.scrollTop=diagBox.scrollHeight;
+    vkDiag('AUTH_PAGE_'+data.step,data.details||{});
+   });
    const frame=d.getElementById('vkAuthFrame'),diagBox=d.getElementById('vkDiag');
    let pipStep=0;const pipDiag=(step,details={})=>{const line='['+(++pipStep)+'] '+step+' '+JSON.stringify(details);diagBox.textContent+='\n'+line;diagBox.scrollTop=diagBox.scrollHeight;vkDiag('PIP_'+step,details);try{vkAuthChannel?.postMessage({type:'PULSAR_VK_DIAG',step,details})}catch(error){vkDiag('DIAG_RELAY_FAILED',{message:error.message})}};
    frame.addEventListener('load',()=>{
