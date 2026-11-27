@@ -58,6 +58,16 @@ button:disabled{opacity:.55;cursor:wait}
    try{
     diag('ONETAP_RENDER_START');widget=new SDK.OneTap().render({container:document.getElementById('vkOneTap'),scheme:SDK.Scheme.LIGHT,lang:SDK.Languages.RUS,showAlternativeLogin:true});diag('ONETAP_RENDER_RETURNED',{widgetPresent:!!widget});
     widget.on(SDK.WidgetEvents.LOAD,()=>{diag('ONETAP_LOAD_EVENT');setStatus('VK ID готов. Выбери способ входа.')});
+    const loginSuccessEvent=SDK.OneTapInternalEvents?.LOGIN_SUCCESS;
+    if(loginSuccessEvent){
+     widget.on(loginSuccessEvent,payload=>{
+      diag('ONETAP_LOGIN_SUCCESS',{hasCode:!!payload?.code,hasDeviceId:!!payload?.device_id,keys:payload&&typeof payload==='object'?Object.keys(payload):[]});
+      try{sendCode(payload)}catch(error){diag('ONETAP_RESULT_INVALID',{name:error?.name,message:error?.message});console.error('VK OneTap returned an invalid auth payload:',error);setStatus('VK ID не вернул данные для завершения входа. Используй кнопку ниже.')}
+     });
+     diag('ONETAP_LOGIN_SUCCESS_HANDLER_READY',{event:loginSuccessEvent});
+    }else{
+     diag('ONETAP_LOGIN_SUCCESS_EVENT_MISSING',{availableEvents:SDK.OneTapInternalEvents?Object.keys(SDK.OneTapInternalEvents):[]});
+    }
     widget.on(SDK.WidgetEvents.ERROR,error=>{diag('ONETAP_ERROR',{code:error?.code,text:error?.text,message:error?.message});console.warn('VK OneTap auth-page widget error:',error);setStatus('Виджет OneTap не ответил ('+(error?.text||'ошибка')+'). Используй кнопку ниже.')});
    }catch(error){diag('ONETAP_RENDER_FAILED',{name:error?.name,message:error?.message});console.warn('VK OneTap auth-page render failed:',error);setStatus('Виджет недоступен. Используй кнопку ниже.')}
   }catch(error){diag('SDK_CONFIG_INIT_FAILED',{name:error?.name,message:error?.message});console.error('VK ID auth-page init failed:',error);setStatus('Ошибка настройки VK ID: '+(error?.message||String(error)))}
