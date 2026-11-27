@@ -48,7 +48,8 @@ def _new_session():
         "auth_error": "", "auth_generation": 0, "vk_service": None, "vk_user_id": None,
         "vk_remixsid": None, "vk_cookie_p": None, "vk_user_agent": None,
         "vk_token_expires": 0, "vk_refresh_lock": threading.Lock(),
-        "vk_auth_error": "",
+        "vk_auth_error": "", "vk_id_access_token": "", "vk_id_refresh_token": "",
+        "vk_id_device_id": "", "vk_id_expires_at": 0, "vk_id_state": "",
         "jobs": {}, "last_seen": time.time(),
         "lock": threading.RLock(), "cache_dir": None,
     }
@@ -494,6 +495,92 @@ def api_vk_official_api_probe():
     except Exception as exc:
         result["details"].append("audio.search: " + str(exc)[:220])
     result["connected"] = bool(result["profile"] and result["audio_search"])
+    return jsonify(result)
+
+
+@app.post("/api/vk/id-exchange")
+def api_vk_id_exchange():
+    """Exchange a VK ID authorization code on the server and test the user access token."""
+    payload = request.get_json(silent=True) or {}
+    code = str(payload.get("code") or "").strip()
+    verifier = str(payload.get("code_verifier") or "").strip()
+    device_id = str(payload.get("device_id") or "").strip()
+    auth_state = str(payload.get("state") or "").strip()
+    redirect_uri = str(payload.get("redirect_uri") or "").strip()
+    client_id = str(payload.get("client_id") or "").strip()
+    if not all((code, verifier, device_id, auth_state, redirect_uri, client_id)):
+        return api_error("Не хватает параметров обмена VK ID.")
+    if len(code) > 4096 or len(verifier) > 256 or len(device_id) > 512 or len(auth_state) > 512:
+        return api_error("Некорректная длина параметров VK ID.")
+    import urllib.parse
+    query = urllib.parse.urlencode({
+        "grant_type": "authorization_code", "redirect_uri": redirect_uri,
+        "client_id": client_id, "code_verifier": verifier,
+        "device_id": device_id, "state": auth_state,
+    })
+    body = urllib.parse.urlencode({"code": code}).encode("utf-8")
+    req = urllib.request.Request(
+        "https://id.vk.ru/oauth2/auth?" + query, data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded",
+                 "User-Agent": "Pulsar/1.0"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            token_data = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        return api_error("VK ID не выдал токен: " + str(exc)[:220], 502)
+    if not isinstance(token_data, dict) or token_data.get("error"):
+        err = token_data.get("error_description") or token_data.get("error") if isinstance(token_data, dict) else "неверный ответ"
+        return api_error("Ошибка обмена VK ID: " + str(err)[:220], 502)
+    if token_data.get("state") != auth_state:
+        return api_error("VK ID вернул несовпадающий state. Повтори вход.", 403)
+    access_token = str(token_data.get("access_token") or "")
+    refresh_token = str(token_data.get("refresh_token") or "")
+    if not access_token:
+        return api_error("VK ID не вернул Access token.", 502)
+    session = state()
+    with session["lock"]:
+        session["vk_id_access_token"] = access_token
+        session["vk_id_refresh_token"] = refresh_token
+        session["vk_id_device_id"] = device_id
+        session["vk_id_expires_at"] = int(time.time()) + int(token_data.get("expires_in") or 3600)
+        session["vk_id_state"] = auth_state
+    result = {"ok": True, "token_type": token_data.get("token_type", "Bearer"),
+              "expires_in": int(token_data.get("expires_in") or 3600),
+              "scope": token_data.get("scope", ""), "profile": False,
+              "audio_search": False, "details": []}
+
+    def vk_call(method, params=None):
+        values = {"access_token": access_token, "v": "5.199"}
+        values.update(params or {})
+        form = urllib.parse.urlencode(values).encode("utf-8")
+        api_req = urllib.request.Request(
+            "https://api.vk.com/method/" + method, data=form,
+            headers={"Content-Type": "application/x-www-form-urlencoded",
+                     "User-Agent": "Pulsar/1.0"}, method="POST")
+        with urllib.request.urlopen(api_req, timeout=18) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        if data.get("error"):
+            err = data["error"] or {}
+            raise RuntimeError("VK API Error " + str(err.get("error_code", "?")) +
+                               ": " + str(err.get("error_msg", "Unknown error"))[:160])
+        return data.get("response")
+
+    try:
+        profile = vk_call("users.get", {"fields": "first_name,last_name"})
+        if isinstance(profile, list) and profile:
+            result["profile"] = True
+            result["user_id"] = profile[0].get("id")
+            result["display_name"] = " ".join(filter(None, [
+                profile[0].get("first_name"), profile[0].get("last_name")])) or "VK"
+    except Exception as exc:
+        result["details"].append("users.get: " + str(exc)[:200])
+    try:
+        tracks = vk_call("audio.search", {"q": "Daft Punk", "count": 1})
+        result["audio_search"] = isinstance(tracks, dict) and bool(tracks.get("items"))
+        result["audio_search_count"] = len(tracks.get("items", [])) if isinstance(tracks, dict) else 0
+    except Exception as exc:
+        result["details"].append("audio.search: " + str(exc)[:200])
+    result["connected"] = bool(result["audio_search"])
     return jsonify(result)
 
 
