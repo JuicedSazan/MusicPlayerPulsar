@@ -344,21 +344,15 @@ checkAuth();
     .brand{font-size:11px;letter-spacing:2px;font-weight:800;color:#29496d;padding:18px 20px 10px}
     iframe{display:block;width:100%;height:365px;border:0;background:#f5f7fb}.diag{height:105px;overflow:auto;border-top:1px solid #dce3ed;padding:7px 12px;background:#fff;color:#34445b;font:10px/1.4 Consolas,monospace;white-space:pre-wrap}
    </style><div class="brand">PULSAR / VK ID</div><iframe id="vkAuthFrame" title="Авторизация VK ID" allow="publickey-credentials-get"></iframe><div id="vkDiag" class="diag">[00] PiP создан. Ожидаем iframe…</div>`;
-   w.addEventListener('message',event=>{
-    if(event.source!==frame.contentWindow)return;
-    const data=event.data;if(data?.type!=='PULSAR_VK_DIAG')return;
-    const line='[AUTH] '+data.step+' '+JSON.stringify(data.details||{});
-    diagBox.textContent+='\\n'+line;diagBox.scrollTop=diagBox.scrollHeight;
-    vkDiag('AUTH_PAGE_'+data.step,data.details||{});
-   });
    const frame=d.getElementById('vkAuthFrame'),diagBox=d.getElementById('vkDiag');
    let pipStep=0;const pipDiag=(step,details={})=>{const line='['+(++pipStep)+'] '+step+' '+JSON.stringify(details);diagBox.textContent+='\n'+line;diagBox.scrollTop=diagBox.scrollHeight;vkDiag('PIP_'+step,details);try{vkAuthChannel?.postMessage({type:'PULSAR_VK_DIAG',step,details})}catch(error){vkDiag('DIAG_RELAY_FAILED',{message:error.message})}};
    frame.addEventListener('load',()=>{
     pipDiag('IFRAME_LOAD',{src:frame.src,frameOrigin:frame.contentWindow.location.origin,mainOrigin:location.origin});
-    try{frame.contentWindow.postMessage({type:'PULSAR_VK_INIT',appId:APP_ID,redirectUrl:location.origin+'/vk-auth',state,codeVerifier,nonce:vkPipNonce,channelName},location.origin);pipDiag('INIT_POSTED',{targetOrigin:location.origin,redirectUrl:location.origin+'/vk-auth'})}catch(error){pipDiag('INIT_POST_FAILED',{name:error.name,message:error.message})}
+    try{vkAuthChannel.postMessage({type:'PULSAR_VK_INIT',appId:APP_ID,redirectUrl:location.origin+'/vk-auth',state,codeVerifier,nonce:vkPipNonce,channelName});pipDiag('INIT_BROADCAST_SENT',{channelName,redirectUrl:location.origin+'/vk-auth'})}catch(error){pipDiag('INIT_BROADCAST_FAILED',{name:error.name,message:error.message})}
    });
    frame.addEventListener('error',event=>pipDiag('IFRAME_ERROR',{message:event.message||'iframe error'}));
-   pipDiag('IFRAME_NAVIGATING',{src:'/vk-auth'});frame.src='/vk-auth';
+   pipDiag('IFRAME_NAVIGATING',{src:'/vk-auth?channel='+encodeURIComponent(channelName)});
+   frame.src='/vk-auth?channel='+encodeURIComponent(channelName);
    w.addEventListener('pagehide',()=>{vkDiag('PIP_PAGEHIDE');
     if(vkPip===w)vkPip=null;
     if(vkAuthChannel){vkAuthChannel.close();vkAuthChannel=null}
