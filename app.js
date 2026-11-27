@@ -221,6 +221,14 @@ checkAuth();
  const STATE_KEY='pulsarVkIdState',VERIFIER_KEY='pulsarVkIdVerifier';
  let vkAccessToken='',vkRefreshToken='',vkDeviceId='';
  const randomString=(length)=>{const alphabet='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-';const bytes=new Uint8Array(length);crypto.getRandomValues(bytes);return Array.from(bytes,b=>alphabet[b%alphabet.length]).join('')};
+ const vkDiagnostics=[];
+ const vkDiag=(step,details={})=>{
+  const entry={time:new Date().toISOString(),step,details};
+  vkDiagnostics.push(entry);if(vkDiagnostics.length>100)vkDiagnostics.shift();
+  console.info('[PULSAR VK DIAG]',entry);window.__pulsarVkDiagnostics=vkDiagnostics;
+ };
+ vkDiag('VK_DIAGNOSTICS_STARTED',{href:location.href,origin:location.origin,readyState:document.readyState,pipSupported:!!window.documentPictureInPicture?.requestWindow,broadcastChannelSupported:typeof BroadcastChannel==='function',sdkPresent:!!window.VKIDSDK});
+
  const showConnected=async(token,deviceId)=>{
   if(!token?.access_token)throw new Error('VK не вернул access token');
   vkAccessToken=token.access_token;vkRefreshToken=token.refresh_token||'';vkDeviceId=token.device_id||deviceId||'';
@@ -232,7 +240,8 @@ checkAuth();
   button.title='Авторизация VK ID выполнена. Доступ к VK Музыке проверим отдельно.';
  };
  const sdkReady=()=>{
-  if(window.VKIDSDK)return true;
+  vkDiag('CHECK_SDK_READY',{present:!!window.VKIDSDK,loadEvent:!!window.__vkSdkLoadEvent,loadError:!!window.__vkSdkLoadError});
+  if(window.VKIDSDK){vkDiag('SDK_READY',{version:window.VKIDSDK.version||'unknown'});return true;}
   const sdkScript=document.querySelector('script[src*="@vkid/sdk"]');
   const src=sdkScript?.src||'URL скрипта не найден';
   const vkGlobals=Object.keys(window).filter(key=>/vkid|vk/i.test(key));
@@ -292,7 +301,8 @@ checkAuth();
  };
  let vkPip=null,vkAuthChannel=null,vkPipNonce='';
   const completeVkAuth=async data=>{
-   if(!data||data.type!=='PULSAR_VK_AUTH_CODE'||data.nonce!==vkPipNonce)return;
+   if(!data||data.type!=='PULSAR_VK_AUTH_CODE'||data.nonce!==vkPipNonce){vkDiag('AUTH_CODE_IGNORED',{type:data?.type||null,nonceMatches:data?.nonce===vkPipNonce});return}
+   vkDiag('AUTH_CODE_RECEIVED',{hasCode:!!data.code,hasDeviceId:!!data.device_id,hasVerifier:!!data.codeVerifier});
    try{
     status.textContent='Обмениваем код VK ID…';
     window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:location.origin+'/vk-auth',state:data.state,codeVerifier:data.codeVerifier,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
@@ -302,42 +312,50 @@ checkAuth();
     if(vkAuthChannel){vkAuthChannel.close();vkAuthChannel=null}
     if(vkPip&&!vkPip.closed)vkPip.close();
    }catch(error){
+    vkDiag('TOKEN_EXCHANGE_FAILED',{name:error?.name,message:error?.message,code:error?.code,text:error?.text});
     console.error('VK ID PiP token exchange failed:',error);
     status.textContent='VK ID: ошибка обмена кода — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';
    }
   };
   const openVkPip=async()=>{
    if(!window.documentPictureInPicture?.requestWindow)throw new Error('Document Picture-in-Picture не поддерживается этим браузером');
-   const w=await window.documentPictureInPicture.requestWindow({width:410,height:470});
+   vkDiag('PIP_REQUEST_START');
+   const w=await window.documentPictureInPicture.requestWindow({width:410,height:500});
    vkPip=w;vkPipNonce=randomString(40);
+   vkDiag('PIP_WINDOW_CREATED',{pipUrl:w.location.href,pipOrigin:w.location.origin,nonceLength:vkPipNonce.length});
    const state=randomString(32),codeVerifier=randomString(64);
    sessionStorage.setItem(STATE_KEY,state);sessionStorage.setItem(VERIFIER_KEY,codeVerifier);
    const channelName='pulsar-vk-auth-'+vkPipNonce;
    vkAuthChannel=new BroadcastChannel(channelName);
-   vkAuthChannel.onmessage=event=>{completeVkAuth(event.data)};
+   vkAuthChannel.onmessage=event=>{const data=event.data;if(data?.type==='PULSAR_VK_DIAG'){vkDiag('PIP_DIAGNOSTIC_RELAY',{step:data.step,details:data.details});return}completeVkAuth(data)};
+   vkDiag('BROADCAST_CHANNEL_READY',{channelName});
    const d=w.document;d.title='Pulsar — вход через VK ID';
    d.body.innerHTML=`<style>
     *{box-sizing:border-box}body{margin:0;background:#f5f7fb;color:#17263b;font:13px Arial,sans-serif}
     .brand{font-size:11px;letter-spacing:2px;font-weight:800;color:#29496d;padding:18px 20px 10px}
-    iframe{display:block;width:100%;height:410px;border:0;background:#f5f7fb}
-   </style><div class="brand">PULSAR / VK ID</div><iframe id="vkAuthFrame" title="Авторизация VK ID" allow="publickey-credentials-get"></iframe>`;
-   const frame=d.getElementById('vkAuthFrame');
-   frame.src='/vk-auth';
+    iframe{display:block;width:100%;height:365px;border:0;background:#f5f7fb}.diag{height:105px;overflow:auto;border-top:1px solid #dce3ed;padding:7px 12px;background:#fff;color:#34445b;font:10px/1.4 Consolas,monospace;white-space:pre-wrap}
+   </style><div class="brand">PULSAR / VK ID</div><iframe id="vkAuthFrame" title="Авторизация VK ID" allow="publickey-credentials-get"></iframe><div id="vkDiag" class="diag">[00] PiP создан. Ожидаем iframe…</div>`;
+   const frame=d.getElementById('vkAuthFrame'),diagBox=d.getElementById('vkDiag');
+   let pipStep=0;const pipDiag=(step,details={})=>{const line='['+(++pipStep)+'] '+step+' '+JSON.stringify(details);diagBox.textContent+='\n'+line;diagBox.scrollTop=diagBox.scrollHeight;vkDiag('PIP_'+step,details);try{vkAuthChannel?.postMessage({type:'PULSAR_VK_DIAG',step,details})}catch(error){vkDiag('DIAG_RELAY_FAILED',{message:error.message})}};
    frame.addEventListener('load',()=>{
-    frame.contentWindow.postMessage({type:'PULSAR_VK_INIT',appId:APP_ID,redirectUrl:location.origin+'/vk-auth',state,codeVerifier,nonce:vkPipNonce,channelName},location.origin);
+    pipDiag('IFRAME_LOAD',{src:frame.src,frameOrigin:frame.contentWindow.location.origin,mainOrigin:location.origin});
+    try{frame.contentWindow.postMessage({type:'PULSAR_VK_INIT',appId:APP_ID,redirectUrl:location.origin+'/vk-auth',state,codeVerifier,nonce:vkPipNonce,channelName},location.origin);pipDiag('INIT_POSTED',{targetOrigin:location.origin,redirectUrl:location.origin+'/vk-auth'})}catch(error){pipDiag('INIT_POST_FAILED',{name:error.name,message:error.message})}
    });
-   w.addEventListener('pagehide',()=>{
+   frame.addEventListener('error',event=>pipDiag('IFRAME_ERROR',{message:event.message||'iframe error'}));
+   pipDiag('IFRAME_NAVIGATING',{src:'/vk-auth'});frame.src='/vk-auth';
+   w.addEventListener('pagehide',()=>{vkDiag('PIP_PAGEHIDE');
     if(vkPip===w)vkPip=null;
     if(vkAuthChannel){vkAuthChannel.close();vkAuthChannel=null}
     sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
    });
+   vkDiag('PIP_SETUP_COMPLETE');
    return w;
   };
   button.addEventListener('click',async()=>{
    if(!sdkReady())return;
-   button.disabled=true;status.textContent='Открываем плавающее окно VK ID…';
-   try{await openVkPip();status.textContent='VK ID открыт в плавающем окне.';status.dataset.state='pending'}
-   catch(error){console.warn('VK PiP unavailable; falling back to VK popup:',error);status.textContent='PiP недоступен — открываем окно VK ID…';await startVkAuth()}
+   vkDiag('LOGIN_BUTTON_CLICKED');button.disabled=true;status.textContent='Открываем плавающее окно VK ID…';
+   try{await openVkPip();vkDiag('PIP_OPENED');status.textContent='VK ID открыт в плавающем окне. Диагностика: внизу PiP.';status.dataset.state='pending'}
+   catch(error){vkDiag('PIP_OPEN_FAILED',{name:error?.name,message:error?.message});console.warn('VK PiP unavailable; falling back to VK popup:',error);status.textContent='PiP недоступен — открываем окно VK ID…';await startVkAuth()}
    finally{button.disabled=false}
   });
 })();
