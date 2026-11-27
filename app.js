@@ -367,94 +367,68 @@ $('vkMusicConnect').onclick=async()=>{
  const APP_ID=54919699;
  const REDIRECT_URL=location.origin+'/';
  const STATE_KEY='pulsarVkIdState',VERIFIER_KEY='pulsarVkIdVerifier';
- let vkAccessToken='',vkRefreshToken='',vkDeviceId='';
- const randomString=(length)=>{const alphabet='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-';const bytes=new Uint8Array(length);crypto.getRandomValues(bytes);return Array.from(bytes,b=>alphabet[b%alphabet.length]).join('')};
- const showConnected=async(token,deviceId)=>{
-  if(!token?.access_token)throw new Error('VK не вернул access token');
-  vkAccessToken=token.access_token;vkRefreshToken=token.refresh_token||'';vkDeviceId=token.device_id||deviceId||'';
-  const profile=await window.VKIDSDK.Auth.userInfo(vkAccessToken);
-  const user=profile?.user||profile||{};
-  const displayName=[user.first_name,user.last_name].filter(Boolean).join(' ')||('ID '+(user.user_id||user.id||'VK'));
-  status.textContent='VK ID: '+displayName+' — проверяю доступ к VK Музыке…';status.dataset.state='checking';
+ const randomString=(length)=>{const alphabet='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~';const bytes=new Uint8Array(length);crypto.getRandomValues(bytes);return Array.from(bytes,b=>alphabet[b%alphabet.length]).join('')};
+ const finishExchange=async(code,deviceId,authState,verifier)=>{
+  const response=await fetch('/api/vk/id-exchange',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+   code,device_id:deviceId,state:authState,code_verifier:verifier,redirect_uri:REDIRECT_URL,client_id:String(APP_ID)
+  }),cache:'no-store'});
+  const result=await response.json();
+  if(!response.ok||result.error)throw new Error(result.error||'Не удалось обменять код VK ID');
+  console.info('[Pulsar VK ID server-side token probe]',result);
   button.textContent='✓　VK ID подключён';
-  button.title='VK ID авторизация выполнена; проверяем совместимость токена с Audio API.';
-  try{
-   const probe=await fetch('/api/vk/id-probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:vkAccessToken,user_agent:navigator.userAgent,user_id:user.user_id||user.id}),cache:'no-store'});
-   const result=await probe.json();
-   console.info('[Pulsar VK ID / Audio API experiment]',result);
-   if(result.connected){
-    status.textContent='VK ID: '+displayName+' — доступ к VK Музыке подтверждён';
-    status.dataset.state='connected';$('vkMusicSettings').textContent='✓　VK Music через VK ID';
-   }else{
-    const parts=[];
-    if(result.user_info)parts.push('профиль OK');
-    if(result.audio_search)parts.push('поиск аудио OK');else parts.push('поиск аудио недоступен');
-    if(result.recommendations)parts.push('рекомендации OK');else parts.push('рекомендации не проверены/недоступны');
-    status.textContent='VK ID подключён; VK Audio API: '+parts.join(', ')+'. Подробности в консоли.';
-    status.dataset.state='warning';
-   }
-  }catch(error){
-   console.error('VK ID / Audio API probe failed:',error);
-   status.textContent='VK ID подключён, но эксперимент VK Audio API завершился ошибкой: '+(error?.message||'ошибка сети');
-   status.dataset.state='error';
+  button.title='VK ID Access token хранится на сервере текущей сессии.';
+  const displayName=result.display_name||('ID '+(result.user_id||'VK'));
+  if(result.audio_search){
+   status.textContent='VK ID: '+displayName+' — поиск VK Музыки доступен';
+   status.dataset.state='connected';$('vkMusicSettings').textContent='✓　VK Music через VK ID';
+  }else{
+   status.textContent='VK ID: '+displayName+' — токен получен, доступ к аудио не подтверждён';
+   status.dataset.state='warning';
+   console.warn('[Pulsar VK ID details]',result.details||[]);
   }
  };
  const sdkReady=()=>{
   if(window.VKIDSDK)return true;
   const sdkScript=document.querySelector('script[src*="@vkid/sdk"]');
-  const src=sdkScript?.src||'URL скрипта не найден';
-  const vkGlobals=Object.keys(window).filter(key=>/vkid|vk/i.test(key));
-  const resource=performance.getEntriesByType('resource').filter(item=>item.name.includes('@vkid/sdk')).map(item=>({name:item.name,duration:Math.round(item.duration),transferSize:item.transferSize,encodedBodySize:item.encodedBodySize}));
-  const reason=window.__vkSdkLoadError?'браузер сообщил об ошибке загрузки скрипта':window.__vkSdkLoadEvent?'событие загрузки прошло, но глобальный объект VKID не появился':'нет подтверждения события загрузки скрипта';
-  console.error('VK ID SDK diagnostic:',{src,reason,loadEvent:!!window.__vkSdkLoadEvent,loadError:!!window.__vkSdkLoadError,readyState:document.readyState,vkGlobals,resource});
-  status.textContent='VK ID SDK: '+reason+'. Подробности — в консоли (VK ID SDK diagnostic).';return false;
+  const reason=window.__vkSdkLoadError?'ошибка загрузки скрипта VK ID SDK':'объект VKID SDK не найден';
+  console.error('VK ID SDK diagnostic:',{src:sdkScript?.src,reason,readyState:document.readyState});
+  status.textContent='VK ID SDK: '+reason+'.';status.dataset.state='error';return false;
  };
  const params=new URL(location.href).searchParams;
  const returnedCode=params.get('code'),returnedDevice=params.get('device_id'),returnedState=params.get('state');
  const returnedError=params.get('error_description')||params.get('error');
  if(returnedCode||returnedError){
   history.replaceState({},document.title,location.pathname+location.hash);
+  const savedState=sessionStorage.getItem(STATE_KEY),savedVerifier=sessionStorage.getItem(VERIFIER_KEY);
+  sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
   if(returnedError){
-   sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
    status.textContent='VK ID: авторизация отменена — '+returnedError;status.dataset.state='error';
+  }else if(!savedState||!savedVerifier||!returnedState||savedState!==returnedState||!returnedDevice){
+   status.textContent='VK ID: не удалось проверить ответ авторизации. Начни вход заново.';status.dataset.state='error';
   }else{
-   const savedState=sessionStorage.getItem(STATE_KEY),savedVerifier=sessionStorage.getItem(VERIFIER_KEY);
-   sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
-   if(!savedState||!savedVerifier||!returnedState||savedState!==returnedState||!returnedDevice){
-    status.textContent='VK ID: не удалось проверить ответ авторизации. Начни вход заново.';status.dataset.state='error';
-    console.error('VK ID callback rejected: missing or mismatched state/verifier/device_id.');
-   }else if(sdkReady()){
-    button.disabled=true;status.textContent='Завершаем авторизацию VK…';
-    try{
-     window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state:savedState,codeVerifier:savedVerifier,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
-     window.VKIDSDK.Auth.exchangeCode(returnedCode,returnedDevice).then(token=>showConnected(token,returnedDevice)).catch(error=>{
-      console.error('VK ID token exchange failed:',error);
-      status.textContent='VK ID: ошибка обмена кода — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';
-     }).finally(()=>{button.disabled=false});
-    }catch(error){
-     console.error('VK ID callback initialization failed:',error);
-     status.textContent='VK ID: ошибка завершения входа — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';button.disabled=false;
-    }
-   }
+   button.disabled=true;status.textContent='Обмениваем код на Access token на сервере VK ID…';
+   finishExchange(returnedCode,returnedDevice,savedState,savedVerifier).catch(error=>{
+    console.error('VK ID server exchange failed:',error);
+    status.textContent='VK ID: ошибка обмена — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';
+   }).finally(()=>{button.disabled=false});
   }
  }
  button.addEventListener('click',async()=>{
   if(!sdkReady())return;
-  button.disabled=true;status.textContent='Открываем авторизацию VK…';
-  const state=randomString(32),codeVerifier=randomString(64);
+  button.disabled=true;status.textContent='Открываем авторизацию VK…';status.dataset.state='checking';
+  const authState=randomString(32),codeVerifier=randomString(64);
   try{
-   sessionStorage.setItem(STATE_KEY,state);sessionStorage.setItem(VERIFIER_KEY,codeVerifier);
-   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier,mode:window.VKIDSDK.ConfigAuthMode.InNewTab,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
+   sessionStorage.setItem(STATE_KEY,authState);sessionStorage.setItem(VERIFIER_KEY,codeVerifier);
+   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state:authState,codeVerifier,mode:window.VKIDSDK.ConfigAuthMode.InNewTab,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
    const authResponse=await window.VKIDSDK.Auth.login({lang:'ru'});
-   if(!authResponse?.code||!authResponse?.device_id)throw new Error('VK ID не вернул код авторизации');
-   status.textContent='Обмениваем код VK ID…';
-   const token=await window.VKIDSDK.Auth.exchangeCode(authResponse.code,authResponse.device_id,codeVerifier);
-   await showConnected(token,authResponse.device_id);
+   if(!authResponse?.code||!authResponse?.device_id)throw new Error('VK ID не вернул код авторизации или device_id');
+   status.textContent='Обмениваем код на Access token на сервере VK ID…';
+   await finishExchange(authResponse.code,authResponse.device_id,authState,codeVerifier);
    sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
   }catch(error){
    sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
-   console.error('VK ID authorization start failed:',error);
-   status.textContent='VK ID: ошибка запуска входа — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';button.disabled=false;
-  }
+   console.error('VK ID authorization failed:',error);
+   status.textContent='VK ID: ошибка входа — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';
+  }finally{button.disabled=false}
  });
 })();
