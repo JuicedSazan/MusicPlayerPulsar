@@ -281,7 +281,7 @@ $('vkWebTokenProbe').onclick=async()=>{
  const button=$('vkWebTokenProbe'),output=$('vkWebTokenMessage');
  const remixsid=$('vkProbeRemixsid').value.trim(),p=$('vkProbeCookieP').value.trim();
  if(!remixsid){output.textContent='Нужна cookie remixsid.';return}
- button.disabled=true;output.textContent='Отправляю один запрос VK с указанными cookies…';
+ button.disabled=true;output.textContent='Подключаю VK Music. Cookies будут храниться только в памяти сервера…';
  try{
   const r=await fetch('/api/vk/web-token-probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({remixsid,p}),cache:'no-store',credentials:'same-origin'});
   const d=await r.json();
