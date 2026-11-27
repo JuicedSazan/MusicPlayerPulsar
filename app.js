@@ -315,11 +315,19 @@ checkAuth();
    const state=randomString(32),codeVerifier=randomString(64);
    sessionStorage.setItem(STATE_KEY,state);sessionStorage.setItem(VERIFIER_KEY,codeVerifier);
    window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier,mode:window.VKIDSDK.ConfigAuthMode.InNewWindow,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
+   // VK ID SDK expects a container from the main document realm.
+   // Render there first, then move the generated widget (including its iframe) into PiP.
+   const sdkHost=document.createElement('div');
+   sdkHost.id='pulsarVkOneTapSdkHost';
+   sdkHost.style.cssText='position:fixed;left:-10000px;top:0;width:340px;min-height:52px;visibility:hidden';
+   document.body.appendChild(sdkHost);
    vkOneTap=new window.VKIDSDK.OneTap();
-   vkOneTap.render({container:d.getElementById('vkOneTap'),scheme:window.VKIDSDK.Scheme.LIGHT,lang:window.VKIDSDK.Languages.RUS,showAlternativeLogin:true})
-    .on(window.VKIDSDK.WidgetEvents.LOAD,()=>{d.getElementById('pipStatus').textContent='Выбери способ входа в виджете VK ID.'})
-    .on(window.VKIDSDK.WidgetEvents.ERROR,error=>{console.error('VK OneTap widget error:',error);d.getElementById('pipStatus').textContent='Виджет не загрузился. Используй запасную кнопку.'});
-  }catch(error){console.error('VK OneTap widget init failed:',error);d.getElementById('pipStatus').textContent='Не удалось встроить виджет. Используй запасную кнопку.'}
+   const widget=vkOneTap.render({container:sdkHost,scheme:window.VKIDSDK.Scheme.LIGHT,lang:window.VKIDSDK.Languages.RUS,showAlternativeLogin:true});
+   d.getElementById('vkOneTap').appendChild(sdkHost);
+   sdkHost.style.cssText='position:relative;left:auto;top:auto;width:100%;min-height:52px;visibility:visible';
+   widget.on(window.VKIDSDK.WidgetEvents.LOAD,()=>{d.getElementById('pipStatus').textContent='Выбери способ входа в виджете VK ID.'})
+    .on(window.VKIDSDK.WidgetEvents.ERROR,error=>{console.error('VK OneTap widget error:',error);d.getElementById('pipStatus').textContent='VK ID сообщил об ошибке загрузки виджета. Используй запасную кнопку.'});
+  }catch(error){console.error('VK OneTap widget init failed:',error);d.getElementById('pipStatus').textContent='Ошибка встраивания: '+(error?.message||String(error));}
   return w;
  };
  button.addEventListener('click',async()=>{
