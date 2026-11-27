@@ -151,7 +151,7 @@ function playWaveHistoryTrack(t){resetShuffle();const upcoming=current>=0?queue.
 function resetTrack(){$('trackTitle').textContent='Ничего не играет';$('trackArtist').textContent='Добавь трек через поиск или ссылку';setRecordArc('labelTitle','YOUR NEXT TRACK',365);setRecordArc('labelArtist','PULSAR',365);setRecordCover(null);$('record').classList.remove('spinning');$('tonearm').classList.remove('playing');$('play').textContent='▶'}
 async function reactTrack(action){if(current<0||!queue[current])return;const t=queue[current];try{const r=await fetch('/api/track-reaction',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({track_id:t.track_id||String(t.id||'').split(':')[0],action})});const d=await r.json();if(!r.ok)throw Error(d.error||'Не удалось изменить оценку');$('likeTrack').classList.toggle('selected',action==='like');$('dislikeTrack').classList.toggle('selected',action==='dislike');msg(action==='like'?'Лайк отправлен в Яндекс Музыку.':'Дизлайк отправлен в Яндекс Музыку.','success')}catch(e){msg(e.message,'error')}}
 async function fetchJson(url){const r=await fetch(url);const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка сервера');return d}
-async function downloadTrack(t, quiet=false){if(t.src)return t;if(t._loading)return t._loading;t._loading=(async()=>{const started=performance.now();if(!quiet)msg('Загружаю аудио: '+t.title+'…');const d=await fetchJson('/api/track?url='+encodeURIComponent(t.url));let delay=350;for(let i=0;i<240;i++){await new Promise(r=>setTimeout(r,delay));const st=await fetchJson('/api/track-status?id='+encodeURIComponent(d.job_id));if(st.status==='done'){Object.assign(t,st.result);console.info('[Pulse timing] track ready', {title:t.title,client_wait_ms:Math.round(performance.now()-started),...st.timings});return t}if(st.status==='error')throw Error(st.error||'Не удалось получить аудио');if(i%4===0&&!quiet)msg(st.progress||'Готовлю аудио…');delay=Math.min(1000,delay+100)}throw Error('Загрузка заняла слишком много времени. Попробуй ещё раз.')})();try{return await t._loading}finally{delete t._loading}}
+async function downloadTrack(t, quiet=false){if(t.src)return t;if(t.provider==='vk'&&t.stream_url){t.src=t.stream_url;return t;}if(t._loading)return t._loading;t._loading=(async()=>{const started=performance.now();if(!quiet)msg('Загружаю аудио: '+t.title+'…');const d=await fetchJson('/api/track?url='+encodeURIComponent(t.url));let delay=350;for(let i=0;i<240;i++){await new Promise(r=>setTimeout(r,delay));const st=await fetchJson('/api/track-status?id='+encodeURIComponent(d.job_id));if(st.status==='done'){Object.assign(t,st.result);console.info('[Pulse timing] track ready', {title:t.title,client_wait_ms:Math.round(performance.now()-started),...st.timings});return t}if(st.status==='error')throw Error(st.error||'Не удалось получить аудио');if(i%4===0&&!quiet)msg(st.progress||'Готовлю аудио…');delay=Math.min(1000,delay+100)}throw Error('Загрузка заняла слишком много времени. Попробуй ещё раз.')})();try{return await t._loading}finally{delete t._loading}}
 function preloadUpcoming(){let count=0;for(let i=current+1;i<queue.length&&count<2;i++){const next=queue[i];if(!next.src&&!preloading.has(next)){count++;preloading.add(next);downloadTrack(next,true).catch(()=>{}).finally(()=>preloading.delete(next))}}}
 function setRecordArc(id,value,maxLength=540){const el=$(id);if(!el)return;const text=String(value||'').trim();el.textContent=text;const length=text.length;const size=(length>42?15:length>32?17:length>23?19:22)*2;el.setAttribute('font-size',String(size));el.setAttribute('textLength',String(Math.min(maxLength,Math.max(80,length*size*.58))));el.setAttribute('lengthAdjust','spacingAndGlyphs')}
 function setRecordCover(track){const img=$('recordCover');if(!img)return;const cover=track?.cover||track?.cover_url||'';if(cover){img.onerror=()=>{img.hidden=true;img.removeAttribute('src')};img.src=cover;img.hidden=false}else{img.hidden=true;img.removeAttribute('src')}}
@@ -181,11 +181,53 @@ async function advanceWave(){
   if(!waveUpcoming.length){const loaded=await fetchMoreWave();if(!loaded)return false}
   const next=waveUpcoming.shift();queue=[next];current=-1;persistState();renderQueue();await playIndex(0);return true;
 }
+async function openVkMix(){
+ resetShuffle();setNavActive('vkMixNav');mode='collection';waveHistory=[];queue=[];current=-1;persistState();audio.pause();renderQueue();
+ msg('Запрашиваю музыкальные рекомендации VK…');
+ try{
+  const d=await fetchJson('/api/vk/recommendations'),tracks=d.tracks||[];
+  if(!tracks.length)throw Error('VK не вернул доступных рекомендаций.');
+  queue=tracks;renderQueue();msg('VK вернул '+tracks.length+' рекомендаций. Проверим, похожи ли они на VK Микс.','success');
+  console.info('[Pulsar VK Mix experiment]',d.timings,{count:tracks.length,firstTracks:tracks.slice(0,10).map(t=>({title:t.title,artist:t.artist,id:t.id}))});
+  await playIndex(0);
+ }catch(e){msg(e.message,'error')}
+}
 async function openWave(){resetShuffle();setNavActive('waveNav');mode='wave';waveHistory=[];waveUpcoming=[];waveLoading=true;queue=[];current=-1;persistState();audio.pause();renderQueue();msg('Подключаю Мою волну…');try{const d=await fetchJson('/api/my-wave');waveBatchId=d.batch_id;const tracks=d.tracks||[];if(!tracks.length)throw Error('Яндекс не вернул треки Моей волны.');queue=[tracks[0]];waveUpcoming=tracks.slice(1);renderQueue();msg('Моя волна готова','success');await playIndex(0)}catch(e){msg(e.message,'error')}finally{waveLoading=false}}
-$('shuffleQueue').onclick=toggleShuffle;$('collectionNav').onclick=()=>{mode='collection';persistState();setNavActive('collectionNav');renderQueue()};$('queueTabQueue').onclick=()=>{queueView='queue';persistState();renderQueue()};$('queueTabRecent').onclick=()=>{queueView='recent';persistState();renderQueue()};$('waveNav').onclick=openWave;
+$('shuffleQueue').onclick=toggleShuffle;$('collectionNav').onclick=()=>{mode='collection';persistState();setNavActive('collectionNav');renderQueue()};$('queueTabQueue').onclick=()=>{queueView='queue';persistState();renderQueue()};$('queueTabRecent').onclick=()=>{queueView='recent';persistState();renderQueue()};$('waveNav').onclick=openWave;$('vkMixNav').onclick=openVkMix;
 $('add').onclick=addByUrl;$('url').addEventListener('keydown',e=>{if(e.key==='Enter')addByUrl()});
-async function search(){const searchStarted=performance.now();const q=$('searchInput').value.trim();$('searchDropdown').hidden=false;if(q.length<2){searchMsg('Введи хотя бы 2 символа.');return}try{const auth=await fetchJson('/api/status');if(auth.auth!=='ready'){searchMsg('Сначала войди в Яндекс через кнопку авторизации.');return}}catch{searchMsg('Не удалось проверить авторизацию. Попробуй ещё раз.');return}const btn=$('searchBtn');btn.disabled=true;$('searchResults').innerHTML='';searchMsg('Ищу в Яндекс Музыке…');try{const d=await fetchJson('/api/search?q='+encodeURIComponent(q));console.info('[Pulse timing] search', {client_total_ms:Math.round(performance.now()-searchStarted),...d.timings});if(!d.results.length){searchMsg('Ничего не найдено. Попробуй другой запрос.');return}searchMsg(`Найдено: ${d.results.length}.`,'success');const list=$('searchResults');d.results.forEach(t=>{const row=document.createElement('div');row.className='search-result';const art=document.createElement('div');art.className='result-cover';art.textContent='♫';if(t.cover){const img=document.createElement('img');img.src=t.cover;img.loading='lazy';img.onerror=()=>img.remove();art.textContent='';art.appendChild(img)}const meta=document.createElement('div');meta.className='result-meta';const title=document.createElement('div');title.className='result-title';title.textContent=t.title;const artist=document.createElement('div');artist.className='result-artist';artist.textContent=t.artist;meta.append(title,artist);const actions=document.createElement('div');actions.className='result-actions';const play=document.createElement('button');play.title='Слушать';play.textContent='▶';play.onclick=()=>{queue.push({...t,src:null});persistState();renderQueue();if(current>=0&&queue.length-1<=current+2)preloadUpcoming();playIndex(queue.length-1)};const plus=document.createElement('button');plus.title='Добавить в очередь';plus.textContent=queueHasTrack(t)?'✓':'+';plus.disabled=queueHasTrack(t);plus.onclick=()=>addSearchTrack(t,plus);actions.append(play,plus);row.append(art,meta,actions);list.appendChild(row)})}catch(e){searchMsg(e.message.includes('авторизац')||e.message.includes('Войди')?'Авторизация Яндекса не найдена. Нажми «Войти в Яндекс» и повтори поиск.':e.message,'error')}finally{btn.disabled=false}}
-$('searchBtn').onclick=search;$('searchInput').addEventListener('focus',()=>{if($('searchResults').children.length||$('searchMessage').textContent.trim())$('searchDropdown').hidden=false});$('searchInput').addEventListener('keydown',e=>{if(e.key==='Enter')search();if(e.key==='Escape')$('searchDropdown').hidden=true});$('searchInput').addEventListener('input',()=>{clearTimeout(searchTimer);if($('searchInput').value.trim().length>=3)searchTimer=setTimeout(search,500)});
+async function search(){
+ const searchStarted=performance.now(),q=$('searchInput').value.trim(),provider=$('searchSource').value;
+ $('searchDropdown').hidden=false;
+ if(q.length<2){searchMsg('Введи хотя бы 2 символа.');return}
+ const btn=$('searchBtn');btn.disabled=true;$('searchResults').innerHTML='';
+ searchMsg(provider==='vk'?'Ищу в VK Музыке…':'Ищу в Яндекс Музыке…');
+ try{
+  if(provider==='yandex'){
+   const auth=await fetchJson('/api/status');
+   if(auth.auth!=='ready')throw Error('Сначала войди в Яндекс через кнопку авторизации.');
+  }
+  const d=await fetchJson((provider==='vk'?'/api/vk/search?q=':'/api/search?q=')+encodeURIComponent(q));
+  console.info('[Pulse timing] '+provider+' search',{client_total_ms:Math.round(performance.now()-searchStarted),...d.timings});
+  if(!d.results.length){searchMsg('Ничего не найдено. Попробуй другой запрос.');return}
+  searchMsg('Найдено: '+d.results.length+'.', 'success');
+  const list=$('searchResults');
+  d.results.forEach(t=>{
+   const row=document.createElement('div');row.className='search-result';
+   const art=document.createElement('div');art.className='result-cover';art.textContent='♫';
+   if(t.cover){const img=document.createElement('img');img.src=t.cover;img.loading='lazy';img.onerror=()=>img.remove();art.textContent='';art.appendChild(img)}
+   const meta=document.createElement('div');meta.className='result-meta';
+   const title=document.createElement('div');title.className='result-title';title.textContent=t.title;
+   const artist=document.createElement('div');artist.className='result-artist';artist.textContent=t.artist;meta.append(title,artist);
+   const actions=document.createElement('div');actions.className='result-actions';
+   const play=document.createElement('button');play.title='Слушать';play.textContent='▶';
+   play.onclick=()=>{queue.push({...t,src:null});persistState();renderQueue();playIndex(queue.length-1)};
+   const plus=document.createElement('button');plus.title='Добавить в очередь';plus.textContent=queueHasTrack(t)?'✓':'+';plus.disabled=queueHasTrack(t);plus.onclick=()=>addSearchTrack(t,plus);
+   actions.append(play,plus);row.append(art,meta,actions);list.appendChild(row);
+  });
+ }catch(e){searchMsg(e.message,'error')}
+ finally{btn.disabled=false}
+}
+$('searchBtn').onclick=search;$('searchSource').onchange=()=>{$('searchResults').innerHTML='';$('searchInput').placeholder='Поиск треков и исполнителей в '+($('searchSource').value==='vk'?'VK Музыке':'Яндекс Музыке')};$('searchInput').addEventListener('focus',()=>{if($('searchResults').children.length||$('searchMessage').textContent.trim())$('searchDropdown').hidden=false});$('searchInput').addEventListener('keydown',e=>{if(e.key==='Enter')search();if(e.key==='Escape')$('searchDropdown').hidden=true});$('searchInput').addEventListener('input',()=>{clearTimeout(searchTimer);if($('searchInput').value.trim().length>=3)searchTimer=setTimeout(search,500)});
 $('play').onclick=()=>{if(!queue.length)return msg('Сначала добавь трек.');if(audio.paused){if(current<0)playIndex(0);else{setupAnalyser();audio.play().then(()=>{$('record').classList.add('spinning');$('tonearm').classList.add('playing');$('play').textContent='Ⅱ';$('statusText').textContent='ВОСПРОИЗВЕДЕНИЕ'}).catch(e=>msg(e.message,'error'))}}else audio.pause()};
 $('likeTrack').onclick=()=>reactTrack('like');$('dislikeTrack').onclick=()=>reactTrack('dislike');$('prev').onclick=()=>playIndex(Math.max(0,current-1));$('next').onclick=async()=>{if(mode==='wave'){try{msg('Запрашиваю следующий трек Моей волны…');await advanceWave()}catch(e){msg('Не удалось продолжить Мою волну: '+e.message,'error')}return}if(current+1<queue.length){playIndex(current+1);return}msg('Это последний трек в очереди.')};$('stop').onclick=()=>{audio.pause();audio.currentTime=0;$('record').classList.remove('spinning');$('tonearm').classList.remove('playing');$('play').textContent='▶';$('statusText').textContent='ГОТОВ'};
 audio.onplay=()=>{syncMediaSession();$('record').classList.add('spinning');$('tonearm').classList.add('playing');$('play').textContent='Ⅱ';$('statusText').textContent='ВОСПРОИЗВЕДЕНИЕ'};audio.onpause=()=>{syncMediaSession();if(!audio.ended){$('record').classList.remove('spinning');$('tonearm').classList.remove('playing');$('play').textContent='▶';if($('statusText').textContent==='ВОСПРОИЗВЕДЕНИЕ')$('statusText').textContent='ПАУЗА'}};
@@ -211,6 +253,22 @@ if(themeButton)themeButton.addEventListener('click',()=>applyTheme(document.body
 
 checkAuth();
 
+
+
+// VK Music session credentials. Secrets are sent only to the session backend and are never saved in localStorage.
+$('vkMusicSettings').onclick=()=>{$('vkMusicPanel').hidden=!$('vkMusicPanel').hidden};
+$('vkMusicConnect').onclick=async()=>{
+ const token=$('vkMusicToken').value.trim(),user_agent=$('vkMusicUA').value.trim(),button=$('vkMusicConnect');
+ if(!token||!user_agent){$('vkMusicMessage').textContent='Заполни оба поля.';return}
+ button.disabled=true;$('vkMusicMessage').textContent='Проверяю токен…';
+ try{
+  const r=await fetch('/api/vk/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,user_agent}),cache:'no-store'});
+  const d=await r.json();if(!r.ok)throw Error(d.error||'Ошибка подключения');
+  $('vkMusicToken').value='';$('vkMusicMessage').textContent='VK Music подключена: '+d.user.name+' (ID '+d.user.id+').';
+  $('vkMusicMessage').dataset.state='connected';$('vkMusicSettings').textContent='✓　VK Music подключена';
+ }catch(e){$('vkMusicMessage').textContent=e.message;$('vkMusicMessage').dataset.state='error'}
+ finally{button.disabled=false}
+};
 
 /* VK ID sign-in test. Tokens stay in memory; no VK secret is exposed to the browser. */
 (function initVkIdTest(){
