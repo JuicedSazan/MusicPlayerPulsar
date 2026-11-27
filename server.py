@@ -426,6 +426,78 @@ def api_vk_id_probe():
         return jsonify(result), 200
 
 
+# Local-only VK browser session. Playwright runs in a dedicated thread because
+# its synchronous API must stay on the thread where it was initialized.
+_vk_browser = None
+_vk_browser_lock = threading.Lock()
+
+
+def _get_vk_browser():
+    global _vk_browser
+    with _vk_browser_lock:
+        if _vk_browser is None:
+            from vk_browser import VKBrowserSession
+            _vk_browser = VKBrowserSession(DATA_ROOT / "vk-browser-profile")
+        return _vk_browser
+
+
+@app.post("/api/vk/browser-login")
+def api_vk_browser_login():
+    if os.environ.get("PULSE_LOCAL_VK_BROWSER", "0") != "1":
+        return api_error("Автоматическая авторизация VK доступна только в локальной версии.", 403)
+    try:
+        _get_vk_browser().open()
+        return jsonify({"ok": True, "message": "Окно VK открыто. Войди в аккаунт и затем нажми «Проверить сессию VK»."})
+    except Exception as exc:
+        return api_error("Не удалось открыть браузер VK: " + str(exc)[:220], 500)
+
+
+@app.post("/api/vk/browser-token")
+def api_vk_browser_token():
+    if os.environ.get("PULSE_LOCAL_VK_BROWSER", "0") != "1":
+        return api_error("Автоматическая авторизация VK доступна только в локальной версии.", 403)
+    try:
+        cookies = _get_vk_browser().cookies()
+    except Exception as exc:
+        return api_error("Не удалось прочитать локальную сессию VK: " + str(exc)[:220], 500)
+
+    remixsid = next((x["value"] for x in cookies if x["name"] == "remixsid" and "vk.ru" in x["domain"]), "")
+    cookie_p = next((x["value"] for x in cookies if x["name"] == "p" and "login.vk.ru" in x["domain"]), "")
+    if not remixsid:
+        return api_error("В окне VK пока нет remixsid. Войди в аккаунт и повтори проверку.", 401)
+    import urllib.parse
+    import urllib.request
+    form = urllib.parse.urlencode({"version": "1", "app_id": "6287487"}).encode()
+    cookie_header = f"remixsid={remixsid}" + (f"; p={cookie_p}" if cookie_p else "")
+    req = urllib.request.Request(
+        "https://login.vk.ru/?act=web_token", data=form,
+        headers={
+            "User-Agent": _get_vk_browser().user_agent(),
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": "https://vk.ru", "Referer": "https://vk.ru/",
+            "Cookie": cookie_header,
+        }, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        return api_error("Ошибка запроса VK: " + str(exc)[:180], 502)
+    if data.get("type") != "okay" or not isinstance(data.get("data"), dict):
+        return jsonify({"ok": False, "error": "VK отклонил локальную сессию: " + str(data.get("error_info") or data.get("type") or "неизвестная ошибка")[:180]}), 401
+    token_data = data["data"]
+    token = str(token_data.get("access_token") or "")
+    if not token:
+        return api_error("VK ответил без access_token.", 502)
+    expires = int(token_data.get("expires") or 0)
+    return jsonify({
+        "ok": True, "user_id": token_data.get("user_id"),
+        "expires_in_seconds": max(0, expires - int(time.time())) if expires else None,
+        "cookie_p_found": bool(cookie_p),
+        "message": "VK выдал веб-токен. Токен не возвращается в браузер и не сохраняется.",
+    })
+
+
 @app.post("/api/vk/web-token-probe")
 def api_vk_web_token_probe():
     """One-shot VK web-token test. Cookie values and token are never logged or persisted."""
