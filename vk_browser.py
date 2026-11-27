@@ -3,6 +3,7 @@
 The worker records only request metadata and response structure. It never
 stores or returns request values, cookies, authorization headers or audio URLs.
 """
+import json
 import queue
 import threading
 from pathlib import Path
@@ -72,7 +73,14 @@ class VKBrowserSession:
         try:
             post_data = request.post_data or ""
             if post_data:
-                post_keys = sorted({key for key, _ in parse_qsl(post_data, keep_blank_values=True)})
+                try:
+                    parsed_body = json.loads(post_data)
+                    if isinstance(parsed_body, dict):
+                        post_keys = sorted(str(key) for key in parsed_body.keys())
+                    else:
+                        post_keys = sorted({key for key, _ in parse_qsl(post_data, keep_blank_values=True)})
+                except (TypeError, ValueError):
+                    post_keys = sorted({key for key, _ in parse_qsl(post_data, keep_blank_values=True)})
         except Exception:
             pass
         return {
