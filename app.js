@@ -336,7 +336,7 @@ checkAuth();
    sessionStorage.setItem(STATE_KEY,state);sessionStorage.setItem(VERIFIER_KEY,codeVerifier);
    const channelName='pulsar-vk-auth-'+vkPipNonce;
    vkAuthChannel=new BroadcastChannel(channelName);
-   vkAuthChannel.onmessage=event=>{const data=event.data;if(data?.type==='PULSAR_VK_DIAG'){vkDiag('PIP_DIAGNOSTIC_RELAY',{step:data.step,details:data.details});return}completeVkAuth(data)};
+   vkAuthChannel.onmessage=event=>{const data=event.data;if(data?.type==='PULSAR_VK_DIAG'){vkDiag('AUTH_PAGE_'+data.step,data.details||{});if(typeof diagBox!=='undefined'){diagBox.textContent+='\\n[AUTH] '+data.step+' '+JSON.stringify(data.details||{});diagBox.scrollTop=diagBox.scrollHeight}return}completeVkAuth(data)};
    vkDiag('BROADCAST_CHANNEL_READY',{channelName});
    const d=w.document;d.title='Pulsar — вход через VK ID';
    d.body.innerHTML=`<style>
