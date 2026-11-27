@@ -574,13 +574,31 @@ def api_vk_id_exchange():
                 profile[0].get("first_name"), profile[0].get("last_name")])) or "VK"
     except Exception as exc:
         result["details"].append("users.get: " + str(exc)[:200])
-    try:
-        tracks = vk_call("audio.search", {"q": "Daft Punk", "count": 1})
-        result["audio_search"] = isinstance(tracks, dict) and bool(tracks.get("items"))
-        result["audio_search_count"] = len(tracks.get("items", [])) if isinstance(tracks, dict) else 0
-    except Exception as exc:
-        result["details"].append("audio.search: " + str(exc)[:200])
-    result["connected"] = bool(result["audio_search"])
+    # Probe several documented audio methods independently. A failure in one
+    # method must not prevent us from learning whether the others are exposed.
+    result["audio_methods"] = {}
+    for method, params in (
+        ("audio.search", {"q": "Daft Punk", "count": 1}),
+        ("audio.get", {"count": 1}),
+        ("audio.getCount", {}),
+    ):
+        try:
+            audio_response = vk_call(method, params)
+            if isinstance(audio_response, dict):
+                summary = {"ok": True, "response_type": "object",
+                           "count": len(audio_response.get("items", []))}
+            elif isinstance(audio_response, list):
+                summary = {"ok": True, "response_type": "array",
+                           "count": len(audio_response)}
+            else:
+                summary = {"ok": True, "response_type": type(audio_response).__name__}
+            result["audio_methods"][method] = summary
+        except Exception as exc:
+            result["audio_methods"][method] = {"ok": False, "error": str(exc)[:220]}
+            result["details"].append(method + ": " + str(exc)[:220])
+    result["audio_search"] = bool(result["audio_methods"].get("audio.search", {}).get("ok"))
+    result["audio_search_count"] = result["audio_methods"].get("audio.search", {}).get("count", 0)
+    result["connected"] = bool(result["profile"] and result["audio_search"])
     return jsonify(result)
 
 
