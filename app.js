@@ -276,8 +276,13 @@ checkAuth();
   const state=randomString(32),codeVerifier=randomString(64);
   try{
    sessionStorage.setItem(STATE_KEY,state);sessionStorage.setItem(VERIFIER_KEY,codeVerifier);
-   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
-   await window.VKIDSDK.Auth.login({lang:'ru'});
+   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier,mode:window.VKIDSDK.ConfigAuthMode.InNewTab,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
+   const authResponse=await window.VKIDSDK.Auth.login({lang:'ru'});
+   if(!authResponse?.code||!authResponse?.device_id)throw new Error('VK ID не вернул код авторизации');
+   status.textContent='Обмениваем код VK ID…';
+   const token=await window.VKIDSDK.Auth.exchangeCode(authResponse.code,authResponse.device_id,codeVerifier);
+   await showConnected(token,authResponse.device_id);
+   sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
   }catch(error){
    sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
    console.error('VK ID authorization start failed:',error);
