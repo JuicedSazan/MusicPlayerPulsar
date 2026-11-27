@@ -221,7 +221,7 @@ checkAuth();
  let vkAccessToken='',vkRefreshToken='',vkDeviceId='';
  const randomString=(length)=>{const bytes=new Uint8Array(length);crypto.getRandomValues(bytes);return Array.from(bytes,b=>('0'+(b%36).toString(36)).slice(-1)).join('')};
  button.addEventListener('click',async()=>{
-  if(!window.VKID){status.textContent='VK ID SDK не загрузился. Проверь подключение к сети.';return}
+  if(!window.VKID){const sdkScript=document.querySelector('script[src*="@vkid/sdk"]');const src=sdkScript?.src||'URL скрипта не найден';const reason=window.__vkSdkLoadError?'браузер сообщил об ошибке загрузки скрипта':'скрипт не создал window.VKID (возможна блокировка или несовместимый файл)';console.error('VK ID SDK unavailable:',{src,reason,readyState:document.readyState});status.textContent='VK ID SDK не загружен: '+reason+'. Источник: '+src;return}
   button.disabled=true;status.textContent='Открываем авторизацию VK…';
   const state=randomString(32),codeVerifier=randomString(64);
   try{
