@@ -572,12 +572,39 @@ def api_vk_web_token_probe():
         }), 429
 
     payload = request.get_json(silent=True) or {}
-    remixsid = str(payload.get("remixsid") or "").strip()
-    cookie_p = str(payload.get("p") or "").strip()
+    raw_remixsid = str(payload.get("remixsid") or "").strip()
+    raw_cookie_p = str(payload.get("p") or "").strip()
+
+    def extract_cookie_value(raw, cookie_name):
+        # Accept either a raw cookie value or a copied Cookie/Set-Cookie fragment.
+        if not raw:
+            return ""
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in raw):
+            raise ValueError("В cookie обнаружены управляющие символы.")
+        candidate = raw
+        if candidate.lower().startswith("cookie:"):
+            candidate = candidate.split(":", 1)[1].strip()
+        parts = [part.strip() for part in candidate.split(";")]
+        named = {}
+        for part in parts:
+            if "=" in part:
+                name, value = part.split("=", 1)
+                named[name.strip()] = value.strip()
+        if cookie_name in named:
+            candidate = named[cookie_name]
+        elif len(parts) > 1 or (parts and parts[0].partition("=")[0].strip() in {"remixsid", "p"}):
+            raise ValueError(f"Не найден параметр {cookie_name} в скопированной строке cookies.")
+        if not candidate or ";" in candidate or len(candidate) > 10000:
+            raise ValueError(f"Некорректное значение {cookie_name}.")
+        return candidate
+
+    try:
+        remixsid = extract_cookie_value(raw_remixsid, "remixsid")
+        cookie_p = extract_cookie_value(raw_cookie_p, "p")
+    except ValueError as exc:
+        return api_error(str(exc))
     if not remixsid:
         return api_error("Нужна cookie remixsid с vk.ru.")
-    if any(c in remixsid + cookie_p for c in "\\r\\n;") or len(remixsid) > 10000 or len(cookie_p) > 10000:
-        return api_error("Некорректный формат cookie.")
 
     import urllib.parse
     import email.utils
