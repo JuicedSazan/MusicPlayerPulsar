@@ -409,10 +409,26 @@ $('vkMusicConnect').onclick=async()=>{
    }else if(sdkReady()){
     button.disabled=true;status.textContent='Завершаем авторизацию VK…';
     try{
-     window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state:savedState,codeVerifier:savedVerifier,mode:window.VKIDSDK.ConfigAuthMode.Redirect,responseMode:window.VKIDSDK.ConfigResponseMode.Redirect});
-     window.VKIDSDK.Auth.exchangeCode(returnedCode,returnedDevice).then(token=>showConnected(token,returnedDevice)).catch(error=>{
-      console.error('VK ID token exchange failed:',error);
-      status.textContent='VK ID: ошибка обмена кода — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';
+     fetch('/api/vk/oauth-exchange',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      code:returnedCode,device_id:returnedDevice,code_verifier:savedVerifier,state:returnedState,redirect_uri:REDIRECT_URL
+     }),cache:'no-store'}).then(async response=>{
+      const result=await response.json();
+      if(!response.ok||!result.ok)throw new Error(result.description||result.error||'Ошибка обмена кода');
+      console.info('[Pulsar VK ID server-side exchange]',result);
+      const displayName=result.display_name||('ID '+(result.user_id||'VK'));
+      if(result.connected){
+       status.textContent='VK ID: '+displayName+' — доступ к VK Музыке подтверждён';
+       status.dataset.state='connected';$('vkMusicSettings').textContent='✓　VK Music через VK ID';
+      }else{
+       const parts=[];
+       if(result.user_info)parts.push('профиль OK');
+       if(result.audio_search)parts.push('поиск аудио OK');else parts.push('поиск аудио недоступен');
+       status.textContent='VK ID: '+displayName+' — '+parts.join(', ')+'. Подробности в консоли.';
+       status.dataset.state='warning';
+      }
+     }).catch(error=>{
+      console.error('VK ID server-side token exchange failed:',error);
+      status.textContent='VK ID: ошибка серверного обмена — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';
      }).finally(()=>{button.disabled=false});
     }catch(error){
      console.error('VK ID callback initialization failed:',error);
