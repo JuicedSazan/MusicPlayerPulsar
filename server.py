@@ -547,92 +547,180 @@ def api_vk_browser_token():
     return jsonify(result)
 
 
+# Process-local guard against repeatedly hitting VK after an explicit rate limit.
+_vk_web_probe_blocked_until = 0.0
+_vk_web_probe_guard = threading.Lock()
+
+
 @app.post("/api/vk/web-token-probe")
 def api_vk_web_token_probe():
-    """One-shot VK web-token test. Cookie values and token are never logged or persisted."""
+    """One-shot VK web-token diagnostic. Never log or persist cookies/tokens."""
+    started = time.monotonic()
+    now = time.time()
+    with _vk_web_probe_guard:
+        blocked_for = max(0, int(_vk_web_probe_blocked_until - now))
+    if blocked_for:
+        return jsonify({
+            "ok": False,
+            "error": "Повторная проверка временно приостановлена после HTTP 429.",
+            "diagnostics": {
+                "stage": "rate_limit_guard", "http_status": 429,
+                "retry_after_seconds": blocked_for,
+                "note": "Защитная пауза действует на этом экземпляре сервера."
+            }
+        }), 429
+
     payload = request.get_json(silent=True) or {}
     remixsid = str(payload.get("remixsid") or "").strip()
     cookie_p = str(payload.get("p") or "").strip()
     if not remixsid:
         return api_error("Нужна cookie remixsid с vk.ru.")
-    if any(c in remixsid + cookie_p for c in "\r\n;") or len(remixsid) > 10000 or len(cookie_p) > 10000:
+    if any(c in remixsid + cookie_p for c in "\\r\\n;") or len(remixsid) > 10000 or len(cookie_p) > 10000:
         return api_error("Некорректный формат cookie.")
 
     import urllib.parse
-    import urllib.request
+    import email.utils
 
     form = urllib.parse.urlencode({"version": "1", "app_id": "6287487"}).encode()
-    base_headers = {
-        "User-Agent": request.headers.get("User-Agent", "Mozilla/5.0"),
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Origin": "https://vk.ru",
-        "Referer": "https://vk.ru/",
+    user_agent = request.headers.get("User-Agent", "Mozilla/5.0")
+    cookie_header = f"remixsid={remixsid}" + (f"; p={cookie_p}" if cookie_p else "")
+    diagnostics = {
+        "stage": "request_web_token",
+        "endpoint": "https://login.vk.ru/?act=web_token",
+        "method": "POST",
+        "cookie_p_provided": bool(cookie_p),
+        "cookie_values_logged_or_saved": False,
+        "request_user_agent_present": bool(user_agent),
+        "request_origin": "https://vk.ru",
+        "started_at_unix": int(now),
     }
-    attempts = [("remixsid", f"remixsid={remixsid}")]
-    if cookie_p:
-        attempts.append(("remixsid+p", f"remixsid={remixsid}; p={cookie_p}"))
-
-    errors = []
-    for label, cookie_header in attempts:
-        req = urllib.request.Request(
-            "https://login.vk.ru/?act=web_token",
-            data=form,
-            headers={**base_headers, "Cookie": cookie_header},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=20) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except Exception as exc:
-            errors.append(f"{label}: {str(exc)[:160]}")
-            continue
-
-        if data.get("type") == "okay" and isinstance(data.get("data"), dict):
-            token_data = data["data"]
-            token = str(token_data.get("access_token") or "")
-            if not token:
-                errors.append(f"{label}: VK ответил без access_token")
-                continue
-            expires = int(token_data.get("expires") or 0)
-            user_id = token_data.get("user_id")
-            result = {
-                "ok": True, "method": label, "user_id": user_id,
-                "expires_at": expires,
-                "expires_in_seconds": max(0, expires - int(time.time())) if expires else None,
-                "audio_search": False, "recommendations": False, "details": [],
-            }
-            if VKMusicService is None:
-                result["details"].append("VKpyMusic не установлена на сервере.")
-            else:
+    req = urllib.request.Request(
+        "https://login.vk.ru/?act=web_token",
+        data=form,
+        headers={
+            "User-Agent": user_agent,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": "https://vk.ru",
+            "Referer": "https://vk.ru/",
+            "Cookie": cookie_header,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            http_status = response.status
+            response_headers = response.headers
+            raw_body = response.read()
+        diagnostics["http_status"] = http_status
+        diagnostics["response_content_type"] = response_headers.get("Content-Type", "")
+        data = json.loads(raw_body.decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        diagnostics["http_status"] = exc.code
+        diagnostics["response_content_type"] = exc.headers.get("Content-Type", "") if exc.headers else ""
+        retry_after = (exc.headers.get("Retry-After") if exc.headers else None)
+        retry_seconds = None
+        if retry_after:
+            try:
+                retry_seconds = max(1, int(retry_after))
+            except ValueError:
                 try:
-                    service = VKMusicService(base_headers["User-Agent"], token)
-                    songs = service.search_songs_by_text("Daft Punk", count=2, offset=0) or []
-                    result["audio_search"] = bool(songs)
-                    result["audio_search_count"] = len(songs)
-                except Exception as exc:
-                    result["details"].append("Поиск VK Audio: " + str(exc)[:180])
-                if user_id:
-                    try:
-                        recommendations = service.get_recommendations(user_id=int(user_id), count=2, offset=0) or []
-                        result["recommendations"] = bool(recommendations)
-                        result["recommendations_count"] = len(recommendations)
-                    except Exception as exc:
-                        result["details"].append("VK Mix: " + str(exc)[:180])
-            result["message"] = (
-                "Сервер получил веб-токен и подтвердил доступ к VK Audio API."
-                if result["audio_search"] else
-                "Веб-токен получен, но доступ к VK Audio API не подтверждён."
-            )
-            # Token and cookies are intentionally not stored in the session or on disk.
-            return jsonify(result)
+                    retry_seconds = max(1, int(email.utils.parsedate_to_datetime(retry_after).timestamp() - time.time()))
+                except Exception:
+                    retry_seconds = None
+        if exc.code == 429:
+            retry_seconds = retry_seconds or 60
+            with _vk_web_probe_guard:
+                global _vk_web_probe_blocked_until
+                _vk_web_probe_blocked_until = max(_vk_web_probe_blocked_until, time.time() + retry_seconds)
+            diagnostics.update({
+                "stage": "vk_rate_limited", "retry_after_header": retry_after,
+                "retry_after_seconds": retry_seconds,
+                "note": "VK вернул HTTP 429. Значение 60 секунд — локальная защитная пауза, если VK не прислал Retry-After; фактический срок ограничения VK неизвестен."
+            })
+            return jsonify({
+                "ok": False,
+                "error": "VK ограничил частоту запросов (HTTP 429). Не повторяй проверку до окончания паузы.",
+                "diagnostics": diagnostics
+            }), 429
+        diagnostics["stage"] = "vk_http_error"
+        diagnostics["error_type"] = "HTTPError"
+        diagnostics["error_message"] = str(exc.reason)[:180]
+        diagnostics["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+        return jsonify({"ok": False, "error": f"VK ответил HTTP {exc.code}.", "diagnostics": diagnostics}), 502
+    except Exception as exc:
+        diagnostics.update({
+            "stage": "network_or_response_error",
+            "error_type": type(exc).__name__,
+            "error_message": str(exc)[:180],
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+        })
+        return jsonify({"ok": False, "error": "Не удалось получить корректный ответ от VK.", "diagnostics": diagnostics}), 502
 
-        info = str(data.get("error_info") or data.get("type") or "неизвестный ответ")
-        errors.append(f"{label}: {info[:160]}")
+    if not isinstance(data, dict):
+        diagnostics["stage"] = "invalid_response_json"
+        return jsonify({"ok": False, "error": "VK вернул неожиданный формат ответа.", "diagnostics": diagnostics}), 502
+    diagnostics["vk_response_type"] = str(data.get("type") or "missing")[:80]
+    if data.get("type") != "okay" or not isinstance(data.get("data"), dict):
+        diagnostics["stage"] = "vk_rejected_session"
+        diagnostics["vk_error_info"] = str(data.get("error_info") or data.get("type") or "unknown")[:180]
+        diagnostics["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+        return jsonify({
+            "ok": False,
+            "error": "VK не принял переданную сессию. Проверь актуальность cookies и домены, с которых они получены.",
+            "diagnostics": diagnostics
+        }), 401
 
-    return jsonify({
-        "ok": False,
-        "error": "VK не выдал веб-токен. " + " | ".join(errors),
-    }), 401
+    token_data = data["data"]
+    token = str(token_data.get("access_token") or "")
+    if not token:
+        diagnostics["stage"] = "token_missing"
+        return jsonify({"ok": False, "error": "VK ответил без access_token.", "diagnostics": diagnostics}), 502
+
+    expires = int(token_data.get("expires") or 0)
+    user_id = token_data.get("user_id")
+    result = {
+        "ok": True, "user_id": user_id,
+        "expires_at": expires,
+        "expires_in_seconds": max(0, expires - int(time.time())) if expires else None,
+        "audio_search": False, "recommendations": False, "details": [],
+        "diagnostics": {**diagnostics, "stage": "web_token_received"},
+    }
+    service = None
+    if VKMusicService is None:
+        result["details"].append("VKpyMusic не установлена на сервере.")
+    else:
+        try:
+            service = VKMusicService(user_agent, token)
+            result["diagnostics"]["stage"] = "vk_audio_search"
+            songs = service.search_songs_by_text("Daft Punk", count=2, offset=0) or []
+            result["audio_search"] = bool(songs)
+            result["audio_search_count"] = len(songs)
+        except Exception as exc:
+            result["details"].append("Поиск VK Audio: " + str(exc)[:180])
+            result["diagnostics"]["audio_search_error_type"] = type(exc).__name__
+        if service and user_id:
+            try:
+                result["diagnostics"]["stage"] = "vk_mix_recommendations"
+                recommendations = service.get_recommendations(user_id=int(user_id), count=2, offset=0) or []
+                result["recommendations"] = bool(recommendations)
+                result["recommendations_count"] = len(recommendations)
+            except Exception as exc:
+                result["details"].append("VK Mix: " + str(exc)[:180])
+                result["diagnostics"]["recommendations_error_type"] = type(exc).__name__
+
+    result["diagnostics"].update({
+        "stage": "complete",
+        "elapsed_ms": int((time.monotonic() - started) * 1000),
+        "token_received": True,
+        "token_or_cookies_saved": False,
+    })
+    result["message"] = (
+        "Веб-токен получен; поиск VK Audio API работает."
+        if result["audio_search"] else
+        "Веб-токен получен, но доступ к поиску VK Audio API не подтверждён."
+    )
+    # Deliberately do not store this diagnostic token or cookies in the session or on disk.
+    return jsonify(result)
 
 
 @app.post("/api/vk/connect")
