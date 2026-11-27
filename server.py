@@ -365,6 +365,61 @@ def api_search():
         return api_error("Поиск не удался: " + str(exc)[:350], 502)
 
 
+@app.post("/api/vk/id-probe")
+def api_vk_id_probe():
+    """Experimental: test whether a VK ID OAuth token also grants VK Audio API access."""
+    if VKMusicService is None:
+        return api_error("VKpyMusic не установлена на сервере.", 503)
+    payload = request.get_json(silent=True) or {}
+    token = str(payload.get("access_token") or "").strip()
+    user_agent = str(payload.get("user_agent") or "").strip()
+    if not token or not user_agent:
+        return api_error("Не хватает VK ID access token или User-Agent.")
+    if len(token) > 12000 or len(user_agent) > 1500:
+        return api_error("Некорректная длина параметров.")
+    result = {"token_received": True, "user_info": False, "audio_search": False,
+              "recommendations": False, "details": []}
+    try:
+        service = VKMusicService(user_agent, token)
+        try:
+            info = service.get_user_info()
+            user_id = getattr(info, "userid", None)
+            result["user_info"] = bool(user_id)
+            result["user_id"] = int(user_id) if user_id else None
+            result["display_name"] = " ".join(filter(None, [
+                getattr(info, "first_name", ""), getattr(info, "last_name", "")
+            ])) or "VK"
+        except Exception as exc:
+            result["details"].append("get_user_info: " + str(exc)[:220])
+            user_id = None
+        try:
+            found = service.search_songs_by_text("Daft Punk", count=1, offset=0) or []
+            result["audio_search"] = bool(found)
+            result["audio_search_count"] = len(found)
+        except Exception as exc:
+            result["details"].append("audio search: " + str(exc)[:220])
+        if user_id:
+            try:
+                recommended = service.get_recommendations(user_id=int(user_id), count=1, offset=0) or []
+                result["recommendations"] = bool(recommended)
+                result["recommendations_count"] = len(recommended)
+            except Exception as exc:
+                result["details"].append("recommendations: " + str(exc)[:220])
+        if result["user_info"] and result["audio_search"]:
+            session = state()
+            with session["lock"]:
+                session["vk_service"] = service
+                session["vk_user_id"] = int(user_id)
+            result["connected"] = True
+        else:
+            result["connected"] = False
+        return jsonify(result)
+    except Exception as exc:
+        result["connected"] = False
+        result["details"].append("Service init: " + str(exc)[:220])
+        return jsonify(result), 200
+
+
 @app.post("/api/vk/connect")
 def api_vk_connect():
     if VKMusicService is None:
