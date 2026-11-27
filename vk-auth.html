@@ -46,31 +46,48 @@ button:disabled{opacity:.55;cursor:wait}
   initialized=true;
   try{
    const SDK=window.VKIDSDK;
+   diag('SDK_CONFIG_INIT_START',{appId:config.appId,redirectUrl:config.redirectUrl,mode:'InNewWindow'});
    SDK.Config.init({app:config.appId,redirectUrl:config.redirectUrl,state:config.state,codeVerifier:config.codeVerifier,mode:SDK.ConfigAuthMode.InNewWindow,responseMode:SDK.ConfigResponseMode.Callback});
-   button.disabled=false;button.textContent='Продолжить через VK ID';
+   diag('SDK_CONFIG_INIT_OK');
+   button.disabled=false;button.textContent='Продолжить через VK ID';diag('FALLBACK_LOGIN_READY');
    button.addEventListener('click',async()=>{
     button.disabled=true;button.textContent='Ожидаем подтверждение…';setStatus('Открой окно VK ID и подтверди вход');
-    try{sendCode(await SDK.Auth.login({lang:'ru'}))}
-    catch(error){console.error('VK ID auth-page login failed:',error);setStatus('Не удалось завершить вход: '+(error?.message||error?.text||'ошибка VK ID'));button.disabled=false;button.textContent='Повторить вход'}
+    try{diag('AUTH_LOGIN_STARTED');sendCode(await SDK.Auth.login({lang:'ru'}));diag('AUTH_LOGIN_RESOLVED')}
+    catch(error){diag('AUTH_LOGIN_FAILED',{name:error?.name,message:error?.message,code:error?.code,text:error?.text});console.error('VK ID auth-page login failed:',error);setStatus('Не удалось завершить вход: '+(error?.message||error?.text||'ошибка VK ID'));button.disabled=false;button.textContent='Повторить вход'}
    });
    try{
-    widget=new SDK.OneTap().render({container:document.getElementById('vkOneTap'),scheme:SDK.Scheme.LIGHT,lang:SDK.Languages.RUS,showAlternativeLogin:true});
-    widget.on(SDK.WidgetEvents.LOAD,()=>setStatus('VK ID готов. Выбери способ входа.'));
-    widget.on(SDK.WidgetEvents.ERROR,error=>{console.warn('VK OneTap auth-page widget error:',error);setStatus('Виджет OneTap не ответил ('+(error?.text||'ошибка')+'). Используй кнопку ниже.')});
-   }catch(error){console.warn('VK OneTap auth-page render failed:',error);setStatus('Виджет недоступен. Используй кнопку ниже.')}
-  }catch(error){console.error('VK ID auth-page init failed:',error);setStatus('Ошибка настройки VK ID: '+(error?.message||String(error)))}
+    diag('ONETAP_RENDER_START');widget=new SDK.OneTap().render({container:document.getElementById('vkOneTap'),scheme:SDK.Scheme.LIGHT,lang:SDK.Languages.RUS,showAlternativeLogin:true});diag('ONETAP_RENDER_RETURNED',{widgetPresent:!!widget});
+    widget.on(SDK.WidgetEvents.LOAD,()=>{diag('ONETAP_LOAD_EVENT');setStatus('VK ID готов. Выбери способ входа.')});
+    widget.on(SDK.WidgetEvents.ERROR,error=>{diag('ONETAP_ERROR',{code:error?.code,text:error?.text,message:error?.message});console.warn('VK OneTap auth-page widget error:',error);setStatus('Виджет OneTap не ответил ('+(error?.text||'ошибка')+'). Используй кнопку ниже.')});
+   }catch(error){diag('ONETAP_RENDER_FAILED',{name:error?.name,message:error?.message});console.warn('VK OneTap auth-page render failed:',error);setStatus('Виджет недоступен. Используй кнопку ниже.')}
+  }catch(error){diag('SDK_CONFIG_INIT_FAILED',{name:error?.name,message:error?.message});console.error('VK ID auth-page init failed:',error);setStatus('Ошибка настройки VK ID: '+(error?.message||String(error)))}
  };
+ const diag=(step,details={})=>{
+  const entry={time:new Date().toISOString(),step,details};
+  console.info('[PULSAR VK AUTH PAGE]',entry);
+  setStatus(step+' — '+JSON.stringify(details));
+  try{window.parent.postMessage({type:'PULSAR_VK_DIAG',step,details},location.origin)}catch{}
+  try{channel?.postMessage({type:'PULSAR_VK_DIAG',step,details})}catch{}
+ };
+ diag('AUTH_PAGE_SCRIPT_STARTED',{href:location.href,origin:location.origin,referrer:document.referrer,readyState:document.readyState,sdkPresent:!!window.VKIDSDK});
  window.addEventListener('message',event=>{
-  if(event.source!==window.parent||event.origin!==location.origin)return;
   const data=event.data;
-  if(!data||data.type!=='PULSAR_VK_INIT'||!data.nonce||!data.state||!data.codeVerifier||data.redirectUrl!==location.origin+'/vk-auth')return;
+  if(event.source!==window.parent){diag('INIT_REJECTED_WRONG_SOURCE',{origin:event.origin,expectedOrigin:location.origin});return}
+  if(event.origin!==location.origin){diag('INIT_REJECTED_WRONG_ORIGIN',{origin:event.origin,expectedOrigin:location.origin,sourceIsParent:true});return}
+  if(!data||data.type!=='PULSAR_VK_INIT'){diag('MESSAGE_IGNORED',{origin:event.origin,type:data?.type||null});return}
+  if(!data.nonce||!data.state||!data.codeVerifier||!data.channelName||data.redirectUrl!==location.origin+'/vk-auth'){diag('INIT_REJECTED_INVALID_CONFIG',{hasNonce:!!data.nonce,hasState:!!data.state,hasVerifier:!!data.codeVerifier,hasChannel:!!data.channelName,redirectUrl:data.redirectUrl,expectedRedirect:location.origin+'/vk-auth'});return}
   config=data;
-  channel=new BroadcastChannel(data.channelName);
+  try{channel=new BroadcastChannel(data.channelName);diag('INIT_ACCEPTED',{channelName:data.channelName,redirectUrl:data.redirectUrl})}catch(error){diag('BROADCAST_CHANNEL_FAILED',{name:error.name,message:error.message})}
   init();
  });
  const sdk=document.querySelector('script[src*="@vkid/sdk"]');
- if(sdk)sdk.addEventListener('load',init);
- if(!window.VKIDSDK&&sdk)sdk.addEventListener('error',()=>setStatus('Не удалось загрузить SDK VK ID. Проверь подключение или блокировщик.'));
+ if(sdk){
+  sdk.addEventListener('load',()=>{diag('SDK_LOAD_EVENT',{sdkPresent:!!window.VKIDSDK});init()});
+  sdk.addEventListener('error',()=>{diag('SDK_LOAD_ERROR',{src:sdk.src});setStatus('Не удалось загрузить SDK VK ID. Проверь подключение или блокировщик.')});
+  if(window.VKIDSDK){diag('SDK_ALREADY_AVAILABLE',{sdkPresent:true});init()}else diag('WAITING_FOR_SDK',{src:sdk.src});
+ }else diag('SDK_SCRIPT_TAG_MISSING');
+ window.addEventListener('error',event=>diag('WINDOW_ERROR',{message:event.message,filename:event.filename,lineno:event.lineno}));
+ window.addEventListener('unhandledrejection',event=>diag('UNHANDLED_REJECTION',{reason:String(event.reason?.message||event.reason)}));
 })();
 </script>
 </body>
