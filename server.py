@@ -532,6 +532,18 @@ def api_vk_browser_login():
         return api_error("Не удалось открыть браузер VK: " + str(exc)[:220], 500)
 
 
+@app.post("/api/vk/inspect-audio")
+def api_vk_inspect_audio():
+    """Inspect official VK Music web requests using the user's local browser session."""
+    if os.environ.get("PULSE_LOCAL_VK_BROWSER", "0") != "1":
+        return api_error("Исследование официального веб-клиента доступно только в локальной версии.", 403)
+    try:
+        result = _get_vk_browser().inspect_audio()
+        return jsonify(result)
+    except Exception as exc:
+        return api_error("Не удалось исследовать VK Музыку: " + str(exc)[:250], 500)
+
+
 @app.post("/api/vk/browser-token")
 def api_vk_browser_token():
     """Obtain a local VK web token, then test the actual VK Audio API."""
