@@ -9,6 +9,12 @@ import threading
 import os
 from pathlib import Path
 
+# Render may omit service-level env vars from the Gunicorn runtime even when
+# they are present in render.yaml. Match the build command explicitly: the
+# browser was installed with PLAYWRIGHT_BROWSERS_PATH=0, so resolve it from
+# Playwright's package-local .local-browsers directory at runtime as well.
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+
 
 _BROWSER_SLOT = threading.BoundedSemaphore(1)
 
