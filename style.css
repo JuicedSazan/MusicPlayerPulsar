@@ -545,3 +545,22 @@ body[data-theme="dark"] .search-dropdown .search-result:hover{background:#1b3452
 #vkMusicMessage{font-size:10px;line-height:1.45;margin-top:8px;color:#777b6e}
 #vkMusicMessage[data-state="connected"]{color:#567000}
 #vkMusicMessage[data-state="error"]{color:#b33b2f}
+
+/* Hosted remote VK browser login */
+.vk-remote-modal{position:fixed;inset:0;z-index:10000;background:#10131dcc;display:grid;place-items:center;padding:18px}
+.vk-remote-modal[hidden]{display:none}
+.vk-remote-dialog{width:min(1120px,96vw);max-height:94vh;overflow:auto;background:#fff;border-radius:16px;padding:18px;box-shadow:0 24px 80px #0006}
+.vk-remote-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:12px}
+.vk-remote-head h2{margin:0 0 5px;font-size:19px}.vk-remote-head p{margin:0;color:#777;font-size:12px;line-height:1.5}
+.vk-remote-head>button{border:0;background:#f0f1eb;border-radius:50%;width:34px;height:34px;font-size:22px;cursor:pointer}
+.vk-remote-screen-wrap{position:relative;width:100%;aspect-ratio:16/10;background:#20242c;border-radius:9px;overflow:hidden}
+#vkRemoteScreen{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair}
+#vkRemoteLoading{position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-size:13px;pointer-events:none}
+#vkRemoteLoading[hidden]{display:none}
+.vk-remote-controls{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+.vk-remote-controls input{flex:1 1 220px;min-width:160px;padding:10px;border:1px solid #ddd;border-radius:7px}
+.vk-remote-controls button{border:0;border-radius:7px;padding:10px 13px;background:#d5ff00;font-size:9px;font-weight:850;cursor:pointer}
+#vkRemoteFinish{background:#222;color:white}
+#vkRemoteMessage{font-size:11px;line-height:1.5;color:#777;margin-top:9px}
+#vkRemoteMessage[data-state=error]{color:#b33b2f}
+@media(max-width:650px){.vk-remote-dialog{padding:10px}.vk-remote-screen-wrap{aspect-ratio:4/3}.vk-remote-controls button{flex:1 1 30%}}
