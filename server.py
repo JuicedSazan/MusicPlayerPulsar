@@ -46,6 +46,9 @@ def _new_session():
     return {
         "client": None, "auth": "idle", "auth_url": "", "auth_code": "",
         "auth_error": "", "auth_generation": 0, "vk_service": None, "vk_user_id": None,
+        "vk_remixsid": None, "vk_cookie_p": None, "vk_user_agent": None,
+        "vk_token_expires": 0, "vk_refresh_lock": threading.Lock(),
+        "vk_auth_error": "",
         "jobs": {}, "last_seen": time.time(),
         "lock": threading.RLock(), "cache_dir": None,
     }
@@ -277,6 +280,81 @@ def _start_auth(s):
 def _get_client(s):
     with s["lock"]:
         return s["client"]
+
+
+def _request_vk_web_token(remixsid, cookie_p, user_agent):
+    """Exchange in-memory VK session cookies for a short-lived web token."""
+    import urllib.parse
+    form = urllib.parse.urlencode({"version": "1", "app_id": "6287487"}).encode()
+    cookie_header = f"remixsid={remixsid}" + (f"; p={cookie_p}" if cookie_p else "")
+    req = urllib.request.Request(
+        "https://login.vk.ru/?act=web_token", data=form,
+        headers={
+            "User-Agent": user_agent or "Mozilla/5.0",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": "https://vk.ru", "Referer": "https://vk.ru/",
+            "Cookie": cookie_header,
+        }, method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=20) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    if not isinstance(data, dict) or data.get("type") != "okay" or not isinstance(data.get("data"), dict):
+        reason = (data.get("error_info") or data.get("type")) if isinstance(data, dict) else "invalid response"
+        raise RuntimeError("VK не принял сессию: " + str(reason)[:160])
+    token_data = data["data"]
+    if not token_data.get("access_token"):
+        raise RuntimeError("VK вернул ответ без web-токена.")
+    return token_data
+
+
+def _ensure_vk_service(s):
+    """Refresh the VK web token shortly before expiry using session cookies in RAM."""
+    with s["lock"]:
+        service = s.get("vk_service")
+        expires = int(s.get("vk_token_expires") or 0)
+        remixsid = s.get("vk_remixsid")
+        cookie_p = s.get("vk_cookie_p") or ""
+        user_agent = s.get("vk_user_agent") or "Mozilla/5.0"
+        user_id = s.get("vk_user_id")
+    if not service:
+        return None, "VK Music не подключена в этой сессии."
+    if not remixsid:
+        return service, ""
+    if expires and expires - int(time.time()) > 120:
+        return service, ""
+    if not s["vk_refresh_lock"].acquire(blocking=False):
+        with s["lock"]:
+            current = s.get("vk_service")
+            current_expiry = int(s.get("vk_token_expires") or 0)
+        if current and (not current_expiry or current_expiry > int(time.time())):
+            return current, ""
+        return None, "Обновляю подключение VK. Повтори запрос через несколько секунд."
+    try:
+        token_data = _request_vk_web_token(remixsid, cookie_p, user_agent)
+        token = str(token_data.get("access_token") or "")
+        new_user_id = token_data.get("user_id") or user_id
+        new_expires = int(token_data.get("expires") or 0)
+        if not token or not new_user_id:
+            raise RuntimeError("VK не вернул токен или ID пользователя.")
+        refreshed_service = VKMusicService(user_agent, token)
+        refreshed_service.search_songs_by_text("Daft Punk", count=1, offset=0)
+        with s["lock"]:
+            s["vk_service"] = refreshed_service
+            s["vk_user_id"] = int(new_user_id)
+            s["vk_token_expires"] = new_expires
+            s["vk_auth_error"] = ""
+        return refreshed_service, ""
+    except Exception as exc:
+        message = str(exc)[:220]
+        with s["lock"]:
+            s["vk_auth_error"] = message
+            current = s.get("vk_service")
+            current_expiry = int(s.get("vk_token_expires") or 0)
+        if current and current_expiry > int(time.time()):
+            return current, ""
+        return None, "Не удалось обновить сессию VK. Возможно, потребуется войти заново."
+    finally:
+        s["vk_refresh_lock"].release()
 
 
 def _valid_yandex_url(url):
@@ -744,18 +822,31 @@ def api_vk_web_token_probe():
                 result["details"].append("VK Mix: " + str(exc)[:180])
                 result["diagnostics"]["recommendations_error_type"] = type(exc).__name__
 
+    if result["audio_search"] and user_id:
+        session = state()
+        with session["lock"]:
+            session["vk_service"] = service
+            session["vk_user_id"] = int(user_id)
+            session["vk_remixsid"] = remixsid
+            session["vk_cookie_p"] = cookie_p
+            session["vk_user_agent"] = user_agent
+            session["vk_token_expires"] = expires
+            session["vk_auth_error"] = ""
+        result["connected"] = True
+    else:
+        result["connected"] = False
     result["diagnostics"].update({
         "stage": "complete",
         "elapsed_ms": int((time.monotonic() - started) * 1000),
         "token_received": True,
-        "token_or_cookies_saved": False,
+        "credentials_stored_on_disk": False,
+        "credentials_kept_in_server_memory": bool(result["connected"]),
     })
     result["message"] = (
-        "Веб-токен получен; поиск VK Audio API работает."
-        if result["audio_search"] else
-        "Веб-токен получен, но доступ к поиску VK Audio API не подтверждён."
+        "VK Music подключена. Токен будет автоматически обновляться в памяти сервера."
+        if result["connected"] else
+        "Веб-токен получен, но подключить VK Music не удалось: поиск или ID пользователя не подтверждены."
     )
-    # Deliberately do not store this diagnostic token or cookies in the session or on disk.
     return jsonify(result)
 
 
@@ -780,6 +871,11 @@ def api_vk_connect():
         with s["lock"]:
             s["vk_service"] = service
             s["vk_user_id"] = int(user_id)
+            s["vk_remixsid"] = None
+            s["vk_cookie_p"] = None
+            s["vk_user_agent"] = None
+            s["vk_token_expires"] = 0
+            s["vk_auth_error"] = ""
         return jsonify({"ok": True, "user": {
             "id": int(user_id),
             "name": " ".join(filter(None, [getattr(info, "first_name", ""), getattr(info, "last_name", "")])) or "VK"
@@ -794,6 +890,11 @@ def api_vk_disconnect():
     with s["lock"]:
         s["vk_service"] = None
         s["vk_user_id"] = None
+        s["vk_remixsid"] = None
+        s["vk_cookie_p"] = None
+        s["vk_user_agent"] = None
+        s["vk_token_expires"] = 0
+        s["vk_auth_error"] = ""
     return jsonify({"ok": True})
 
 
@@ -821,10 +922,9 @@ def api_vk_search():
     if len(query) < 2:
         return jsonify({"results": []})
     s = state()
-    with s["lock"]:
-        service = s.get("vk_service")
+    service, refresh_error = _ensure_vk_service(s)
     if not service:
-        return api_error("Сначала подключи VK Music в настройках Пульсара.", 401)
+        return api_error(refresh_error or "Сначала подключи VK Music в настройках Пульсара.", 401)
     try:
         started = time.perf_counter()
         songs = service.search_songs_by_text(query, count=30, offset=0) or []
@@ -844,10 +944,9 @@ def api_vk_stream():
     if not re.fullmatch(r"-?\d+", owner_id) or not re.fullmatch(r"\d+", track_id):
         return api_error("Некорректный идентификатор VK-трека.")
     s = state()
-    with s["lock"]:
-        service = s.get("vk_service")
+    service, refresh_error = _ensure_vk_service(s)
     if not service:
-        return api_error("VK Music не подключена в этой сессии.", 401)
+        return api_error(refresh_error or "VK Music не подключена в этой сессии.", 401)
     try:
         songs = service.get_songs_by_id([owner_id + "_" + track_id]) or []
         item = next((_vk_track_item(song) for song in songs if getattr(song, "url", None)), None)
@@ -914,10 +1013,11 @@ def api_vk_audio():
 @app.get("/api/vk/recommendations")
 def api_vk_recommendations():
     s = state()
+    service, refresh_error = _ensure_vk_service(s)
     with s["lock"]:
-        service, user_id = s.get("vk_service"), s.get("vk_user_id")
+        user_id = s.get("vk_user_id")
     if not service or not user_id:
-        return api_error("Сначала подключи VK Music в настройках Пульсара.", 401)
+        return api_error(refresh_error or "Сначала подключи VK Music в настройках Пульсара.", 401)
     try:
         started = time.perf_counter()
         songs = service.get_recommendations(user_id=user_id, count=50, offset=0) or []
