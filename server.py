@@ -601,6 +601,15 @@ def api_vk_web_token_probe():
     try:
         remixsid = extract_cookie_value(raw_remixsid, "remixsid")
         cookie_p = extract_cookie_value(raw_cookie_p, "p")
+        # If a complete Cookie header was pasted into the remixsid field,
+        # reuse its p value unless the dedicated p field was filled separately.
+        if not cookie_p and (";" in raw_remixsid or raw_remixsid.lower().startswith("cookie:")):
+            header_text = raw_remixsid.split(":", 1)[1].strip() if raw_remixsid.lower().startswith("cookie:") else raw_remixsid
+            for part in header_text.split(";"):
+                name, separator, value = part.strip().partition("=")
+                if separator and name.strip() == "p":
+                    cookie_p = value.strip()
+                    break
     except ValueError as exc:
         return api_error(str(exc))
     if not remixsid:
