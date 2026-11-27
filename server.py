@@ -594,15 +594,37 @@ def api_vk_web_token_probe():
                 errors.append(f"{label}: VK ответил без access_token")
                 continue
             expires = int(token_data.get("expires") or 0)
-            # Deliberately discard token and cookies after confirming issuance.
-            return jsonify({
-                "ok": True,
-                "method": label,
-                "user_id": token_data.get("user_id"),
+            user_id = token_data.get("user_id")
+            result = {
+                "ok": True, "method": label, "user_id": user_id,
                 "expires_at": expires,
                 "expires_in_seconds": max(0, expires - int(time.time())) if expires else None,
-                "message": "Веб-токен успешно получен. Для этого теста он не сохранён.",
-            })
+                "audio_search": False, "recommendations": False, "details": [],
+            }
+            if VKMusicService is None:
+                result["details"].append("VKpyMusic не установлена на сервере.")
+            else:
+                try:
+                    service = VKMusicService(base_headers["User-Agent"], token)
+                    songs = service.search_songs_by_text("Daft Punk", count=2, offset=0) or []
+                    result["audio_search"] = bool(songs)
+                    result["audio_search_count"] = len(songs)
+                except Exception as exc:
+                    result["details"].append("Поиск VK Audio: " + str(exc)[:180])
+                if user_id:
+                    try:
+                        recommendations = service.get_recommendations(user_id=int(user_id), count=2, offset=0) or []
+                        result["recommendations"] = bool(recommendations)
+                        result["recommendations_count"] = len(recommendations)
+                    except Exception as exc:
+                        result["details"].append("VK Mix: " + str(exc)[:180])
+            result["message"] = (
+                "Сервер получил веб-токен и подтвердил доступ к VK Audio API."
+                if result["audio_search"] else
+                "Веб-токен получен, но доступ к VK Audio API не подтверждён."
+            )
+            # Token and cookies are intentionally not stored in the session or on disk.
+            return jsonify(result)
 
         info = str(data.get("error_info") or data.get("type") or "неизвестный ответ")
         errors.append(f"{label}: {info[:160]}")
