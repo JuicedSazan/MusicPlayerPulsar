@@ -581,12 +581,20 @@ def api_vk_id_exchange():
         ("audio.search", {"q": "Daft Punk", "count": 1}),
         ("audio.get", {"count": 1}),
         ("audio.getCount", {}),
+        # Experimental newer VK catalog search method. It is not part of the
+        # legacy public audio API, so keep this diagnostic-only until verified.
+        ("catalog.getAudioSearch", {"query": "Daft Punk", "need_blocks": 1}),
     ):
         try:
             audio_response = vk_call(method, params)
             if isinstance(audio_response, dict):
+                items = audio_response.get("items", [])
                 summary = {"ok": True, "response_type": "object",
-                           "count": len(audio_response.get("items", []))}
+                           "count": len(items) if isinstance(items, list) else 0,
+                           "keys": list(audio_response.keys())[:12]}
+                if method == "catalog.getAudioSearch":
+                    summary["has_blocks"] = bool(audio_response.get("blocks"))
+                    summary["has_items"] = bool(items)
             elif isinstance(audio_response, list):
                 summary = {"ok": True, "response_type": "array",
                            "count": len(audio_response)}
