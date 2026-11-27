@@ -48,7 +48,7 @@ def _new_session():
         "auth_error": "", "auth_generation": 0, "vk_service": None, "vk_user_id": None,
         "vk_remixsid": None, "vk_cookie_p": None, "vk_user_agent": None,
         "vk_token_expires": 0, "vk_refresh_lock": threading.Lock(),
-        "vk_auth_error": "",
+        "vk_auth_error": "", "vk_remote_browser": None,
         "jobs": {}, "last_seen": time.time(),
         "lock": threading.RLock(), "cache_dir": None,
     }
@@ -363,6 +363,134 @@ def _valid_yandex_url(url):
         return parsed.scheme == "https" and (parsed.hostname or "").lower() in ("music.yandex.ru", "music.yandex.com", "music.yandex.by", "music.yandex.kz")
     except Exception:
         return False
+
+
+
+# Hosted VK login prototype. Browser and cookies are isolated per Pulsar session.
+@app.post("/api/vk/remote/start")
+def api_vk_remote_start():
+    s = state()
+    with s["lock"]:
+        existing = s.get("vk_remote_browser")
+    if existing:
+        try:
+            existing.close()
+        except Exception:
+            pass
+    try:
+        from vk_remote_browser import VKRemoteBrowser
+        browser = VKRemoteBrowser()
+        with s["lock"]:
+            s["vk_remote_browser"] = browser
+        return jsonify({"ok": True, "width": browser.WIDTH, "height": browser.HEIGHT})
+    except Exception as exc:
+        return api_error("Не удалось запустить удалённый Chromium: " + str(exc)[:220], 503)
+
+
+@app.post("/api/vk/remote/screen")
+def api_vk_remote_screen():
+    s = state()
+    with s["lock"]:
+        browser = s.get("vk_remote_browser")
+    if not browser:
+        return api_error("Сначала запусти окно авторизации VK.", 404)
+    try:
+        return jsonify({"ok": True, "image": browser.screenshot(), "width": browser.WIDTH, "height": browser.HEIGHT})
+    except Exception as exc:
+        return api_error("Не удалось получить изображение VK: " + str(exc)[:180], 502)
+
+
+@app.post("/api/vk/remote/input")
+def api_vk_remote_input():
+    s = state()
+    with s["lock"]:
+        browser = s.get("vk_remote_browser")
+    if not browser:
+        return api_error("Окно авторизации VK не запущено.", 404)
+    payload = request.get_json(silent=True) or {}
+    action = payload.get("action")
+    try:
+        if action == "click":
+            x, y = payload.get("x"), payload.get("y")
+            if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+                return api_error("Некорректные координаты.")
+            browser.click(x, y)
+        elif action == "type":
+            value = payload.get("text")
+            if not isinstance(value, str) or len(value) > 2000:
+                return api_error("Некорректный ввод.")
+            browser.type_text(value)
+        elif action == "press":
+            browser.press(str(payload.get("key") or ""))
+        elif action == "scroll":
+            browser.scroll(payload.get("delta", 0))
+        else:
+            return api_error("Неизвестное действие.")
+        return jsonify({"ok": True})
+    except Exception as exc:
+        return api_error("Не удалось передать действие браузеру: " + str(exc)[:160], 502)
+
+
+@app.post("/api/vk/remote/finish")
+def api_vk_remote_finish():
+    s = state()
+    with s["lock"]:
+        browser = s.get("vk_remote_browser")
+    if not browser:
+        return api_error("Окно авторизации VK не запущено.", 404)
+    if VKMusicService is None:
+        return api_error("VKpyMusic не установлена на сервере.", 503)
+    try:
+        cookies = browser.cookies()
+        remixsid = next((x.get("value", "") for x in cookies
+                         if x.get("name") == "remixsid" and "vk.ru" in x.get("domain", "")), "")
+        cookie_p = next((x.get("value", "") for x in cookies
+                         if x.get("name") == "p" and "login.vk.ru" in x.get("domain", "")), "")
+        if not remixsid:
+            return api_error("Авторизация пока не обнаружена. Заверши вход в VK и повтори проверку.", 401)
+        token_data = _request_vk_web_token(remixsid, cookie_p, browser.user_agent())
+        token = str(token_data.get("access_token") or "")
+        user_id = token_data.get("user_id")
+        if not token or not user_id:
+            return api_error("VK не вернул web-токен или ID пользователя.", 502)
+        service = VKMusicService(browser.user_agent(), token)
+        with s["lock"]:
+            s.update(vk_service=service, vk_user_id=int(user_id),
+                     vk_remixsid=remixsid, vk_cookie_p=cookie_p,
+                     vk_user_agent=browser.user_agent(),
+                     vk_token_expires=int(token_data.get("expires") or 0),
+                     vk_auth_error="")
+        try:
+            service.search_songs_by_text("Daft Punk", count=1, offset=0)
+            audio_search = True
+        except Exception:
+            audio_search = False
+        return jsonify({"ok": True, "connected": True, "user_id": int(user_id),
+                        "audio_search": audio_search,
+                        "message": "Сессия VK подключена. Токен хранится только на сервере."})
+    except Exception as exc:
+        return api_error("Не удалось завершить авторизацию VK: " + str(exc)[:220], 502)
+    finally:
+        with s["lock"]:
+            s["vk_remote_browser"] = None
+        try:
+            browser.close()
+        except Exception:
+            pass
+
+
+@app.post("/api/vk/remote/close")
+def api_vk_remote_close():
+    s = state()
+    with s["lock"]:
+        browser = s.get("vk_remote_browser")
+        s["vk_remote_browser"] = None
+    if browser:
+        try:
+            browser.close()
+        except Exception:
+            pass
+    return jsonify({"ok": True})
 
 
 @app.get("/health")
