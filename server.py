@@ -584,6 +584,48 @@ def api_vk_id_exchange():
     return jsonify(result)
 
 
+@app.post("/api/vk/id-refresh")
+def api_vk_id_refresh():
+    """Rotate a stored VK ID refresh token; the previous refresh token is invalidated by VK."""
+    session = state()
+    payload = request.get_json(silent=True) or {}
+    client_id = str(payload.get("client_id") or "").strip()
+    redirect_uri = str(payload.get("redirect_uri") or "").strip()
+    with session["lock"]:
+        refresh_token = session.get("vk_id_refresh_token") or ""
+        device_id = session.get("vk_id_device_id") or ""
+    if not refresh_token or not device_id or not client_id or not redirect_uri:
+        return api_error("Нет сохранённого refresh token или параметров VK ID.", 401)
+    import urllib.parse
+    refresh_state = secrets.token_urlsafe(32)
+    query = urllib.parse.urlencode({
+        "grant_type": "refresh_token", "client_id": client_id,
+        "device_id": device_id, "redirect_uri": redirect_uri,
+        "state": refresh_state,
+    })
+    body = urllib.parse.urlencode({"refresh_token": refresh_token}).encode("utf-8")
+    req = urllib.request.Request(
+        "https://id.vk.ru/oauth2/auth?" + query, data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded",
+                 "User-Agent": "Pulsar/1.0"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        return api_error("Не удалось обновить VK ID Access token: " + str(exc)[:200], 502)
+    if not isinstance(data, dict) or data.get("error"):
+        err = (data.get("error_description") or data.get("error")) if isinstance(data, dict) else "неверный ответ"
+        return api_error("VK ID отклонил обновление: " + str(err)[:200], 401)
+    if data.get("state") != refresh_state or not data.get("access_token") or not data.get("refresh_token"):
+        return api_error("VK ID вернул некорректный ответ обновления. Войди заново.", 502)
+    with session["lock"]:
+        session["vk_id_access_token"] = str(data["access_token"])
+        session["vk_id_refresh_token"] = str(data["refresh_token"])
+        session["vk_id_expires_at"] = int(time.time()) + int(data.get("expires_in") or 3600)
+    return jsonify({"ok": True, "expires_in": int(data.get("expires_in") or 3600),
+                    "message": "VK ID Access token обновлён."})
+
+
 @app.post("/api/vk/id-probe")
 def api_vk_id_probe():
     """Experimental: test whether a VK ID OAuth token also grants VK Audio API access."""
