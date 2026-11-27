@@ -277,6 +277,34 @@ async function vkBrowserAction(endpoint, buttonId, messageId, initialText) {
 }
 $('vkBrowserLogin').onclick=()=>vkBrowserAction('/api/vk/browser-login','vkBrowserLogin','vkBrowserMessage','Открываю отдельное окно VK…');
 $('vkBrowserProbe').onclick=()=>vkBrowserAction('/api/vk/browser-token','vkBrowserProbe','vkBrowserMessage','Проверяю локальную сессию VK…');
+
+$('vkBrowserCookieProbe').onclick=async()=>{
+ const button=$('vkBrowserCookieProbe'),output=$('vkBrowserCookieMessage');
+ button.disabled=true;output.textContent='Проверяю доступ к VK из браузера…';output.dataset.state='';
+ try{
+  const body=new URLSearchParams({version:'1',app_id:'6287487'});
+  const response=await fetch('https://login.vk.ru/?act=web_token',{
+   method:'POST',mode:'cors',credentials:'include',
+   headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
+   body:body.toString(),cache:'no-store'
+  });
+  const data=await response.json();
+  const tokenData=data&&data.data||{};
+  const ok=response.ok&&data.type==='okay'&&!!tokenData.access_token;
+  if(ok){
+   output.textContent='УСПЕХ: браузер получил VK web-токен автоматически. ID: '+(tokenData.user_id||'не указан')+'. Срок: '+(tokenData.expires||'не указан')+'. Сам токен не отображается и никуда не отправляется.';
+   output.dataset.state='connected';
+  }else{
+   output.textContent='VK ответил HTTP '+response.status+', type: '+(data?.type||'неизвестно')+'. '+(data?.error_info||'Токен не получен.');
+   output.dataset.state='error';
+  }
+ }catch(e){
+  output.textContent='Браузер не дал прочитать ответ VK: '+(e.name==='TypeError'?'вероятно, CORS заблокировал доступ к ответу. ':'')+e.message+'. Запрос мог быть отправлен, но страница Pulsar не получила ответ.';
+  output.dataset.state='error';
+  console.warn('[Pulsar VK browser-cookie experiment]',e);
+ }finally{button.disabled=false}
+};
+
 $('vkWebTokenProbe').onclick=async()=>{
  const button=$('vkWebTokenProbe'),output=$('vkWebTokenMessage');
  const remixsid=$('vkProbeRemixsid').value.trim(),p=$('vkProbeCookieP').value.trim();
