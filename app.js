@@ -221,18 +221,18 @@ checkAuth();
  let vkAccessToken='',vkRefreshToken='',vkDeviceId='';
  const randomString=(length)=>{const bytes=new Uint8Array(length);crypto.getRandomValues(bytes);return Array.from(bytes,b=>('0'+(b%36).toString(36)).slice(-1)).join('')};
  button.addEventListener('click',async()=>{
-  if(!window.VKID){const sdkScript=document.querySelector('script[src*="@vkid/sdk"]');const src=sdkScript?.src||'URL скрипта не найден';const vkGlobals=Object.keys(window).filter(key=>/vkid|vk/i.test(key));const resource=performance.getEntriesByType('resource').filter(item=>item.name.includes('@vkid/sdk')).map(item=>({name:item.name,duration:Math.round(item.duration),transferSize:item.transferSize,encodedBodySize:item.encodedBodySize}));const reason=window.__vkSdkLoadError?'браузер сообщил об ошибке загрузки скрипта':window.__vkSdkLoadEvent?'событие загрузки прошло, но глобальный объект VKID не появился':'нет подтверждения события загрузки скрипта';const details={src,reason,loadEvent:!!window.__vkSdkLoadEvent,loadError:!!window.__vkSdkLoadError,readyState:document.readyState,vkGlobals,resource};console.error('VK ID SDK diagnostic:',details);status.textContent='VK ID SDK: '+reason+'. Подробности — в консоли (VK ID SDK diagnostic).';return}
+  if(!window.VKIDSDK){const sdkScript=document.querySelector('script[src*="@vkid/sdk"]');const src=sdkScript?.src||'URL скрипта не найден';const vkGlobals=Object.keys(window).filter(key=>/vkid|vk/i.test(key));const resource=performance.getEntriesByType('resource').filter(item=>item.name.includes('@vkid/sdk')).map(item=>({name:item.name,duration:Math.round(item.duration),transferSize:item.transferSize,encodedBodySize:item.encodedBodySize}));const reason=window.__vkSdkLoadError?'браузер сообщил об ошибке загрузки скрипта':window.__vkSdkLoadEvent?'событие загрузки прошло, но глобальный объект VKID не появился':'нет подтверждения события загрузки скрипта';const details={src,reason,loadEvent:!!window.__vkSdkLoadEvent,loadError:!!window.__vkSdkLoadError,readyState:document.readyState,vkGlobals,resource};console.error('VK ID SDK diagnostic:',details);status.textContent='VK ID SDK: '+reason+'. Подробности — в консоли (VK ID SDK diagnostic).';return}
   button.disabled=true;status.textContent='Открываем авторизацию VK…';
   const state=randomString(32),codeVerifier=randomString(64);
   try{
-   window.VKID.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier});
-   const response=await window.VKID.Auth.login({lang:'ru'});
+   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier});
+   const response=await window.VKIDSDK.Auth.login({lang:'ru'});
    if(!response||!response.code||!response.device_id)throw new Error('VK не вернул код авторизации или device_id');
    if(response.state!==state)throw new Error('Не совпало состояние OAuth. Повтори вход.');
-   const token=await window.VKID.Auth.exchangeCode(response.code,response.device_id,codeVerifier);
+   const token=await window.VKIDSDK.Auth.exchangeCode(response.code,response.device_id,codeVerifier);
    if(!token||!token.access_token)throw new Error('VK не вернул access token');
    vkAccessToken=token.access_token;vkRefreshToken=token.refresh_token||'';vkDeviceId=token.device_id||response.device_id;
-   const profile=await window.VKID.Auth.userInfo(vkAccessToken);
+   const profile=await window.VKIDSDK.Auth.userInfo(vkAccessToken);
    const user=profile?.user||profile||{};
    const displayName=[user.first_name,user.last_name].filter(Boolean).join(' ')||('ID '+(user.user_id||user.id||'VK'));
    status.textContent='VK ID: '+displayName+' — подключён';
