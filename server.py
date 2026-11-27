@@ -440,6 +440,7 @@ def api_vk_remote_finish():
         return api_error("Окно авторизации VK не запущено.", 404)
     if VKMusicService is None:
         return api_error("VKpyMusic не установлена на сервере.", 503)
+    keep_open = False
     try:
         cookies = browser.cookies()
         remixsid = next((x.get("value", "") for x in cookies
@@ -447,6 +448,7 @@ def api_vk_remote_finish():
         cookie_p = next((x.get("value", "") for x in cookies
                          if x.get("name") == "p" and "login.vk.ru" in x.get("domain", "")), "")
         if not remixsid:
+            keep_open = True
             return api_error("Авторизация пока не обнаружена. Заверши вход в VK и повтори проверку.", 401)
         token_data = _request_vk_web_token(remixsid, cookie_p, browser.user_agent())
         token = str(token_data.get("access_token") or "")
@@ -471,12 +473,13 @@ def api_vk_remote_finish():
     except Exception as exc:
         return api_error("Не удалось завершить авторизацию VK: " + str(exc)[:220], 502)
     finally:
-        with s["lock"]:
-            s["vk_remote_browser"] = None
-        try:
-            browser.close()
-        except Exception:
-            pass
+        if not keep_open:
+            with s["lock"]:
+                s["vk_remote_browser"] = None
+            try:
+                browser.close()
+            except Exception:
+                pass
 
 
 @app.post("/api/vk/remote/close")
@@ -535,8 +538,16 @@ def api_login():
 def api_logout():
     s = state()
     with s["lock"]:
-        s.update(client=None, auth="idle", auth_url="", auth_code="", auth_error="", jobs={})
+        remote_browser = s.get("vk_remote_browser")
+        s["vk_remote_browser"] = None
+        s.update(client=None, auth="idle", auth_url="", auth_code="", auth_error="", jobs={},
+                 vk_service=None, vk_user_id=None, vk_remixsid=None, vk_cookie_p=None)
         s["auth_generation"] += 1
+    if remote_browser:
+        try:
+            remote_browser.close()
+        except Exception:
+            pass
     # Remove only this browser's temporary cache.
     if s["cache_dir"]:
         shutil.rmtree(s["cache_dir"], ignore_errors=True)
