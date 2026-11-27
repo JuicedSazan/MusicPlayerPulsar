@@ -447,7 +447,7 @@ def api_vk_search():
 def api_vk_stream():
     owner_id = str(request.args.get("owner_id") or "").strip()
     track_id = str(request.args.get("track_id") or "").strip()
-    if not re.fullmatch(r"-?\\d+", owner_id) or not re.fullmatch(r"\\d+", track_id):
+    if not re.fullmatch(r"-?\d+", owner_id) or not re.fullmatch(r"\d+", track_id):
         return api_error("Некорректный идентификатор VK-трека.")
     s = state()
     with s["lock"]:
