@@ -9,25 +9,42 @@ echo.
 
 :: Port 443 requires elevated permissions on Windows.
 net session >nul 2>&1
-if not "%errorlevel%"=="0" (
+if errorlevel 1 (
     echo [ERROR] Port 443 requires Administrator rights.
     echo Right-click run_local.bat and choose "Run as administrator".
     pause
     exit /b 1
 )
 
+:: Prefer the Python launcher, but accept any Python 3.11+ installation.
+set "PYTHON_CMD="
 where py >nul 2>nul
-if %errorlevel%==0 (
-    py -3.11 --version >nul 2>nul
-    if %errorlevel%==0 (set "PYTHON=py -3.11") else (set "PYTHON=py")
-) else (
+if not errorlevel 1 (
+    py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>nul
+    if not errorlevel 1 set "PYTHON_CMD=py -3"
+)
+
+:: Fall back to python.exe if the launcher is unavailable or too old.
+if not defined PYTHON_CMD (
     where python >nul 2>nul
-    if %errorlevel%==0 (set "PYTHON=python") else (
-        echo [ERROR] Python 3.11+ not found. https://www.python.org/downloads/
-        pause
-        exit /b 1
+    if not errorlevel 1 (
+        python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>nul
+        if not errorlevel 1 set "PYTHON_CMD=python"
     )
 )
+
+if not defined PYTHON_CMD (
+    echo [ERROR] Python 3.11 or newer was not found.
+    echo Install Python 3.11+ from https://www.python.org/downloads/
+    echo During installation, enable "Add Python to PATH".
+    echo Then reopen this window and run this file again as Administrator.
+    pause
+    exit /b 1
+)
+
+echo Using:
+%PYTHON_CMD% --version
+echo.
 
 where mkcert >nul 2>nul
 if errorlevel 1 (
@@ -40,7 +57,7 @@ if errorlevel 1 (
 
 if not exist ".venv\Scripts\python.exe" (
     echo [1/4] Creating Python environment...
-    %PYTHON% -m venv .venv
+    %PYTHON_CMD% -m venv .venv
     if errorlevel 1 goto :error
 )
 
