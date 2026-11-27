@@ -1,2 +1,2 @@
-Pulsar Web v1.1.1
+Pulsar Web v1.1.2
 Base: Pulse Vinyl Web v1.1
