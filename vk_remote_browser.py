@@ -36,7 +36,10 @@ class VKRemoteBrowser:
         try:
             from playwright.sync_api import sync_playwright
             with sync_playwright() as p:
+                # Explicit channel uses the full Chromium binary in headless mode,
+                # not Playwright's separate chromium_headless_shell executable.
                 browser = p.chromium.launch(
+                    channel="chromium",
                     headless=True,
                     args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
                           "--no-zygote", "--disable-background-networking"],
