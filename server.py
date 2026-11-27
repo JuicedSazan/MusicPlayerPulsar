@@ -715,7 +715,7 @@ def api_vk_audio():
     """Proxy VK audio through localhost so browser playback is not blocked by CDN CORS."""
     owner_id = str(request.args.get("owner_id") or "").strip()
     track_id = str(request.args.get("track_id") or "").strip()
-    if not re.fullmatch(r"-?\\d+", owner_id) or not re.fullmatch(r"\\d+", track_id):
+    if not re.fullmatch(r"-?\d+", owner_id) or not re.fullmatch(r"\d+", track_id):
         return api_error("Некорректный идентификатор VK-трека.")
     s = state()
     with s["lock"]:
