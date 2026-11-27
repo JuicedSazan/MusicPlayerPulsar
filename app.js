@@ -291,12 +291,11 @@ checkAuth();
   }finally{button.disabled=false}
  };
  let vkPip=null,vkAuthChannel=null,vkPipNonce='';
-  window.addEventListener('message',async event=>{
-   if(!vkPip||event.source!==vkPip||event.origin!==location.origin)return;
-   const data=event.data;
+  const completeVkAuth=async data=>{
    if(!data||data.type!=='PULSAR_VK_AUTH_CODE'||data.nonce!==vkPipNonce)return;
    try{
     status.textContent='Обмениваем код VK ID…';
+    window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:location.origin+'/vk-auth',state:data.state,codeVerifier:data.codeVerifier,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
     const token=await window.VKIDSDK.Auth.exchangeCode(data.code,data.device_id,data.codeVerifier);
     await showConnected(token,data.device_id);
     sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
@@ -306,7 +305,7 @@ checkAuth();
     console.error('VK ID PiP token exchange failed:',error);
     status.textContent='VK ID: ошибка обмена кода — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';
    }
-  });
+  };
   const openVkPip=async()=>{
    if(!window.documentPictureInPicture?.requestWindow)throw new Error('Document Picture-in-Picture не поддерживается этим браузером');
    const w=await window.documentPictureInPicture.requestWindow({width:410,height:470});
@@ -315,11 +314,7 @@ checkAuth();
    sessionStorage.setItem(STATE_KEY,state);sessionStorage.setItem(VERIFIER_KEY,codeVerifier);
    const channelName='pulsar-vk-auth-'+vkPipNonce;
    vkAuthChannel=new BroadcastChannel(channelName);
-   vkAuthChannel.onmessage=event=>{
-    const data=event.data;
-    if(!data||data.type!=='PULSAR_VK_AUTH_CODE'||data.nonce!==vkPipNonce)return;
-    w.postMessage(data,location.origin);
-   };
+   vkAuthChannel.onmessage=event=>{completeVkAuth(event.data)};
    const d=w.document;d.title='Pulsar — вход через VK ID';
    d.body.innerHTML=`<style>
     *{box-sizing:border-box}body{margin:0;background:#f5f7fb;color:#17263b;font:13px Arial,sans-serif}
@@ -330,12 +325,6 @@ checkAuth();
    frame.src='/vk-auth';
    frame.addEventListener('load',()=>{
     frame.contentWindow.postMessage({type:'PULSAR_VK_INIT',appId:APP_ID,redirectUrl:location.origin+'/vk-auth',state,codeVerifier,nonce:vkPipNonce,channelName},location.origin);
-   });
-   w.addEventListener('message',event=>{
-    if(event.source!==frame.contentWindow||event.origin!==location.origin)return;
-    const data=event.data;
-    if(!data||data.type!=='PULSAR_VK_AUTH_CODE'||data.nonce!==vkPipNonce)return;
-    if(vkAuthChannel)vkAuthChannel.postMessage(data);
    });
    w.addEventListener('pagehide',()=>{
     if(vkPip===w)vkPip=null;
