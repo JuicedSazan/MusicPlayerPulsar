@@ -46,13 +46,13 @@ button:disabled{opacity:.55;cursor:wait}
   initialized=true;
   try{
    const SDK=window.VKIDSDK;
-   diag('SDK_CONFIG_INIT_START',{appId:config.appId,redirectUrl:config.redirectUrl,mode:'InNewWindow'});
-   SDK.Config.init({app:config.appId,redirectUrl:config.redirectUrl,state:config.state,codeVerifier:config.codeVerifier,mode:SDK.ConfigAuthMode.InNewWindow,responseMode:SDK.ConfigResponseMode.Callback});
+   diag('SDK_CONFIG_INIT_START',{appId:config.appId,redirectUrl:config.redirectUrl,mode:'Redirect'});
+   SDK.Config.init({app:config.appId,redirectUrl:config.redirectUrl,state:config.state,codeVerifier:config.codeVerifier,mode:SDK.ConfigAuthMode.Redirect,responseMode:SDK.ConfigResponseMode.Callback});
    diag('SDK_CONFIG_INIT_OK');
    button.disabled=false;button.textContent='Продолжить через VK ID';diag('FALLBACK_LOGIN_READY');
    button.addEventListener('click',async()=>{
     button.disabled=true;button.textContent='Ожидаем подтверждение…';setStatus('Открой окно VK ID и подтверди вход');
-    try{diag('AUTH_LOGIN_STARTED');sendCode(await SDK.Auth.login({lang:'ru'}));diag('AUTH_LOGIN_RESOLVED')}
+    try{diag('AUTH_LOGIN_STARTED',{mode:'Redirect'});await SDK.Auth.login({lang:'ru'});diag('AUTH_LOGIN_REDIRECT_RETURNED')}
     catch(error){diag('AUTH_LOGIN_FAILED',{name:error?.name,message:error?.message,code:error?.code,text:error?.text});console.error('VK ID auth-page login failed:',error);setStatus('Не удалось завершить вход: '+(error?.message||error?.text||'ошибка VK ID'));button.disabled=false;button.textContent='Повторить вход'}
    });
    try{
@@ -80,6 +80,23 @@ button:disabled{opacity:.55;cursor:wait}
   try{channel?.postMessage({type:'PULSAR_VK_DIAG',step,details})}catch{}
  };
  diag('AUTH_PAGE_SCRIPT_STARTED',{href:location.href,origin:location.origin,referrer:document.referrer,readyState:document.readyState,sdkPresent:!!window.VKIDSDK});
+ const callbackParams=new URLSearchParams(location.search);
+ const callbackChannel=callbackParams.get('channel');
+ const callbackCode=callbackParams.get('code');
+ const callbackDeviceId=callbackParams.get('device_id');
+ const callbackState=callbackParams.get('state');
+ if(callbackChannel&&callbackCode&&callbackDeviceId&&callbackState&&/^[a-zA-Z0-9_-]{20,100}$/.test(callbackChannel)){
+  try{
+   const saved=sessionStorage.getItem('pulsarVkAuthConfig:'+callbackChannel);
+   const restored=saved?JSON.parse(saved):null;
+   if(restored&&restored.state===callbackState&&restored.channelName===callbackChannel){
+    config=restored;
+    diag('OAUTH_REDIRECT_CALLBACK_RECEIVED',{hasCode:true,hasDeviceId:true,stateMatches:true});
+   }else{
+    diag('OAUTH_REDIRECT_CALLBACK_REJECTED',{hasSavedConfig:!!restored,stateMatches:restored?.state===callbackState,channelMatches:restored?.channelName===callbackChannel});
+   }
+  }catch(error){diag('OAUTH_REDIRECT_CALLBACK_RESTORE_FAILED',{message:error.message})}
+ }
  const channelName=new URLSearchParams(location.search).get('channel');
  if(channelName&&/^[a-zA-Z0-9_-]{20,100}$/.test(channelName)){
   try{
@@ -87,12 +104,23 @@ button:disabled{opacity:.55;cursor:wait}
    channel.onmessage=event=>{
     const data=event.data;
     if(!data||data.type!=='PULSAR_VK_INIT'){if(data?.type==='PULSAR_VK_DIAG')return;diag('CHANNEL_MESSAGE_IGNORED',{type:data?.type||null});return}
-    if(!data.nonce||!data.state||!data.codeVerifier||data.channelName!==channelName||data.redirectUrl!==location.origin+'/vk-auth'){diag('INIT_REJECTED_INVALID_CONFIG',{hasNonce:!!data.nonce,hasState:!!data.state,hasVerifier:!!data.codeVerifier,channelMatches:data.channelName===channelName,redirectUrl:data.redirectUrl,expectedRedirect:location.origin+'/vk-auth'});return}
-    config=data;diag('INIT_ACCEPTED',{channelName,redirectUrl:data.redirectUrl});init();
+    const expectedRedirect=location.origin+'/vk-auth?channel='+encodeURIComponent(channelName);
+    if(!data.nonce||!data.state||!data.codeVerifier||data.channelName!==channelName||data.redirectUrl!==expectedRedirect){diag('INIT_REJECTED_INVALID_CONFIG',{hasNonce:!!data.nonce,hasState:!!data.state,hasVerifier:!!data.codeVerifier,channelMatches:data.channelName===channelName,redirectMatches:data.redirectUrl===expectedRedirect});return}
+    config=data;
+    try{sessionStorage.setItem('pulsarVkAuthConfig:'+channelName,JSON.stringify(config))}catch(error){diag('AUTH_CONFIG_PERSIST_FAILED',{message:error.message})}
+    diag('INIT_ACCEPTED',{channelName,redirectUrl:data.redirectUrl,mode:'Redirect'});init();
    };
    diag('BROADCAST_CHANNEL_LISTENING',{channelName});
   }catch(error){diag('BROADCAST_CHANNEL_FAILED',{name:error.name,message:error.message})}
  }else diag('INVALID_OR_MISSING_CHANNEL_QUERY',{hasChannel:!!channelName});
+ if(config&&callbackCode&&callbackDeviceId&&callbackState){
+  try{
+   const response={code:callbackCode,device_id:callbackDeviceId,state:callbackState};
+   sendCode(response);
+   sessionStorage.removeItem('pulsarVkAuthConfig:'+channelName);
+   diag('OAUTH_REDIRECT_CODE_FORWARDED',{hasCode:true,hasDeviceId:true});
+  }catch(error){diag('OAUTH_REDIRECT_FORWARD_FAILED',{name:error.name,message:error.message});setStatus('Не удалось передать результат входа в Пульсар.')}
+ }
 
  const sdk=document.querySelector('script[src*="@vkid/sdk"]');
  if(sdk){
