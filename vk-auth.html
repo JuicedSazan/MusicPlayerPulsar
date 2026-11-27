@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Вход в Пульсар — VK ID</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:18px 20px 20px;background:#f5f7fb;color:#17263b;font:13px Arial,sans-serif}
+.brand{font-size:10px;letter-spacing:2px;font-weight:800;color:#29496d;margin-bottom:15px}
+h1{font-size:18px;margin:0 0 7px}
+p{font-size:12px;line-height:1.5;color:#65758b;margin:0 0 16px}
+#vkOneTap{min-height:54px;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
+#vkOneTap iframe{max-width:100%}
+.divider{display:flex;align-items:center;gap:9px;color:#98a4b4;font-size:10px;margin:13px 0}
+.divider:before,.divider:after{content:"";height:1px;background:#dce3ed;flex:1}
+button{width:100%;border:0;border-radius:10px;padding:12px;background:#2787f5;color:#fff;font-weight:700;cursor:pointer}
+button:disabled{opacity:.55;cursor:wait}
+#status{font-size:11px;line-height:1.45;color:#8290a2;margin-top:13px;min-height:28px}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@vkid/sdk@2.6.1/dist-sdk/umd/index.js"></script>
+</head>
+<body>
+<div class="brand">PULSAR / VK ID</div>
+<h1>Вход в Пульсар</h1>
+<p>Войди через официальный сервис VK ID. После подтверждения окно авторизации вернётся в Пульсар.</p>
+<div id="vkOneTap"></div>
+<div class="divider">ИЛИ</div>
+<button id="login" type="button" disabled>Загрузка VK ID…</button>
+<div id="status" role="status">Подготавливаем безопасное соединение…</div>
+<script>
+(()=>{
+ const status=document.getElementById('status'),button=document.getElementById('login');
+ let config=null,initialized=false,channel=null,widget=null;
+ const setStatus=value=>status.textContent=value;
+ const sendCode=response=>{
+  if(!response?.code||!response?.device_id)throw new Error('VK ID не вернул код авторизации');
+  const message={type:'PULSAR_VK_AUTH_CODE',nonce:config.nonce,code:response.code,device_id:response.device_id,codeVerifier:config.codeVerifier,state:config.state};
+  window.parent.postMessage(message,location.origin);
+  if(channel)channel.postMessage(message);
+  button.disabled=true;button.textContent='Авторизация завершена';
+  setStatus('Вход подтверждён. Возвращаемся в Пульсар…');
+ };
+ const init=()=>{
+  if(initialized||!config||!window.VKIDSDK)return;
+  initialized=true;
+  try{
+   const SDK=window.VKIDSDK;
+   SDK.Config.init({app:config.appId,redirectUrl:config.redirectUrl,state:config.state,codeVerifier:config.codeVerifier,mode:SDK.ConfigAuthMode.InNewWindow,responseMode:SDK.ConfigResponseMode.Callback});
+   button.disabled=false;button.textContent='Продолжить через VK ID';
+   button.addEventListener('click',async()=>{
+    button.disabled=true;button.textContent='Ожидаем подтверждение…';setStatus('Открой окно VK ID и подтверди вход');
+    try{sendCode(await SDK.Auth.login({lang:'ru'}))}
+    catch(error){console.error('VK ID auth-page login failed:',error);setStatus('Не удалось завершить вход: '+(error?.message||error?.text||'ошибка VK ID'));button.disabled=false;button.textContent='Повторить вход'}
+   });
+   try{
+    widget=new SDK.OneTap().render({container:document.getElementById('vkOneTap'),scheme:SDK.Scheme.LIGHT,lang:SDK.Languages.RUS,showAlternativeLogin:true});
+    widget.on(SDK.WidgetEvents.LOAD,()=>setStatus('VK ID готов. Выбери способ входа.'));
+    widget.on(SDK.WidgetEvents.ERROR,error=>{console.warn('VK OneTap auth-page widget error:',error);setStatus('Виджет OneTap не ответил ('+(error?.text||'ошибка')+'). Используй кнопку ниже.')});
+   }catch(error){console.warn('VK OneTap auth-page render failed:',error);setStatus('Виджет недоступен. Используй кнопку ниже.')}
+  }catch(error){console.error('VK ID auth-page init failed:',error);setStatus('Ошибка настройки VK ID: '+(error?.message||String(error)))}
+ };
+ window.addEventListener('message',event=>{
+  if(event.source!==window.parent||event.origin!==location.origin)return;
+  const data=event.data;
+  if(!data||data.type!=='PULSAR_VK_INIT'||!data.nonce||!data.state||!data.codeVerifier||data.redirectUrl!==location.origin+'/vk-auth')return;
+  config=data;
+  channel=new BroadcastChannel(data.channelName);
+  init();
+ });
+ const sdk=document.querySelector('script[src*="@vkid/sdk"]');
+ if(sdk)sdk.addEventListener('load',init);
+ if(!window.VKIDSDK&&sdk)sdk.addEventListener('error',()=>setStatus('Не удалось загрузить SDK VK ID. Проверь подключение или блокировщик.'));
+})();
+</script>
+</body>
+</html>
