@@ -289,7 +289,6 @@ def index():
     return send_from_directory(ROOT, "index.html")
 
 
-
 @app.get("/<path:filename>")
 def static_files(filename):
     # Audio is never served from a public, guessable path.
