@@ -297,7 +297,7 @@ $('vkInspectAudio').onclick=async()=>{
 
 
 /* Hosted VK remote-browser login prototype */
-let vkRemoteTimer=null,vkRemoteBusy=false;
+let vkRemoteTimer=null,vkRemoteBusy=false,vkRemoteStarted=false;
 const vkRemoteModal=$('vkRemoteModal'),vkRemoteScreen=$('vkRemoteScreen'),vkRemoteLoading=$('vkRemoteLoading'),vkRemoteMessage=$('vkRemoteMessage');
 async function vkRemoteRequest(path,body={}){
  const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin',cache:'no-store'});
@@ -313,12 +313,14 @@ async function vkRemoteStart(){
  const button=$('vkRemoteLogin');button.disabled=true;vkRemoteMessage.textContent='Запускаю удалённый Chromium…';vkRemoteModal.hidden=false;vkRemoteLoading.hidden=false;
  try{
   await vkRemoteRequest('/api/vk/remote/start');
+  vkRemoteStarted=true;vkRemoteScreen.style.pointerEvents='auto';
   await vkRemoteRefresh();vkRemoteTimer=setInterval(vkRemoteRefresh,1200);
   vkRemoteMessage.textContent='Нажимай на изображение, чтобы управлять страницей VK. После входа нажми «ГОТОВО».';
- }catch(error){vkRemoteMessage.textContent=error.message;vkRemoteMessage.dataset.state='error';vkRemoteLoading.textContent='Не удалось запустить браузер'}
+ }catch(error){vkRemoteStarted=false;if(vkRemoteTimer)clearInterval(vkRemoteTimer);vkRemoteTimer=null;vkRemoteScreen.style.pointerEvents='none';vkRemoteMessage.textContent=error.message;vkRemoteMessage.dataset.state='error';vkRemoteLoading.textContent='Не удалось запустить браузер'}
  finally{button.disabled=false}
 }
 async function vkRemoteInput(action,extra={}){
+ if(!vkRemoteStarted)return;
  try{await vkRemoteRequest('/api/vk/remote/input',{action,...extra});setTimeout(vkRemoteRefresh,250)}
  catch(error){vkRemoteMessage.textContent=error.message;vkRemoteMessage.dataset.state='error'}
 }
@@ -334,7 +336,7 @@ $('vkRemoteSend').onclick=async()=>{
 $('vkRemoteEnter').onclick=()=>vkRemoteInput('press',{key:'Enter'});
 $('vkRemoteScroll').onclick=()=>vkRemoteInput('scroll',{delta:650});
 $('vkRemoteClose').onclick=async()=>{
- if(vkRemoteTimer)clearInterval(vkRemoteTimer);vkRemoteTimer=null;vkRemoteModal.hidden=true;vkRemoteScreen.removeAttribute('src');
+ vkRemoteStarted=false;if(vkRemoteTimer)clearInterval(vkRemoteTimer);vkRemoteTimer=null;vkRemoteModal.hidden=true;vkRemoteScreen.removeAttribute('src');
  try{await vkRemoteRequest('/api/vk/remote/close')}catch(_){}
 };
 $('vkRemoteFinish').onclick=async()=>{
@@ -344,7 +346,7 @@ $('vkRemoteFinish').onclick=async()=>{
   $('vkAuthStatus').textContent='VK Music: подключена · ID '+result.user_id;$('vkAuthStatus').dataset.state='connected';
   $('vkMusicSettings').textContent='✓　VK Music подключена';
   vkRemoteMessage.textContent=result.message+(result.audio_search?' Поиск аудио отвечает.':' Токен получен, но тест поиска аудио не прошёл.');
-  if(vkRemoteTimer)clearInterval(vkRemoteTimer);vkRemoteTimer=null;setTimeout(()=>{vkRemoteModal.hidden=true;vkRemoteScreen.removeAttribute('src')},1600);
+  vkRemoteStarted=false;if(vkRemoteTimer)clearInterval(vkRemoteTimer);vkRemoteTimer=null;setTimeout(()=>{vkRemoteModal.hidden=true;vkRemoteScreen.removeAttribute('src')},1600);
  }catch(error){vkRemoteMessage.textContent=error.message;vkRemoteMessage.dataset.state='error'}
  finally{button.disabled=false}
 };
