@@ -555,6 +555,7 @@ _vk_web_probe_guard = threading.Lock()
 @app.post("/api/vk/web-token-probe")
 def api_vk_web_token_probe():
     """One-shot VK web-token diagnostic. Never log or persist cookies/tokens."""
+    global _vk_web_probe_blocked_until
     started = time.monotonic()
     now = time.time()
     with _vk_web_probe_guard:
@@ -630,7 +631,6 @@ def api_vk_web_token_probe():
         if exc.code == 429:
             retry_seconds = retry_seconds or 60
             with _vk_web_probe_guard:
-                global _vk_web_probe_blocked_until
                 _vk_web_probe_blocked_until = max(_vk_web_probe_blocked_until, time.time() + retry_seconds)
             diagnostics.update({
                 "stage": "vk_rate_limited", "retry_after_header": retry_after,
