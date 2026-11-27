@@ -277,6 +277,19 @@ async function vkBrowserAction(endpoint, buttonId, messageId, initialText) {
 }
 $('vkBrowserLogin').onclick=()=>vkBrowserAction('/api/vk/browser-login','vkBrowserLogin','vkBrowserMessage','Открываю отдельное окно VK…');
 $('vkBrowserProbe').onclick=()=>vkBrowserAction('/api/vk/browser-token','vkBrowserProbe','vkBrowserMessage','Проверяю локальную сессию VK…');
+$('vkWebTokenProbe').onclick=async()=>{
+ const button=$('vkWebTokenProbe'),output=$('vkWebTokenMessage');
+ const remixsid=$('vkProbeRemixsid').value.trim(),p=$('vkProbeCookieP').value.trim();
+ if(!remixsid){output.textContent='Нужна cookie remixsid.';return}
+ button.disabled=true;output.textContent='Сервер запрашивает веб-токен и проверяет VK Audio API…';
+ try{
+  const r=await fetch('/api/vk/web-token-probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({remixsid,p}),cache:'no-store',credentials:'same-origin'});
+  const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Проверка не пройдена');
+  $('vkProbeRemixsid').value='';$('vkProbeCookieP').value='';
+  output.textContent='Токен: получен. Поиск VK Audio: '+(d.audio_search?'работает':'не подтверждён')+'. VK Mix: '+(d.recommendations?'работает':'не подтверждён')+'. ID: '+(d.user_id||'—')+'. Срок токена: '+(d.expires_in_seconds??'—')+' сек. '+d.message+(d.details?.length?' Детали: '+d.details.join(' | '):'');
+ }catch(e){output.textContent=e.message}
+ finally{button.disabled=false}
+};
 
 $('vkMusicConnect').onclick=async()=>{
  const token=$('vkMusicToken').value.trim(),user_agent=$('vkMusicUA').value.trim(),button=$('vkMusicConnect');
