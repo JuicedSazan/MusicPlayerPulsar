@@ -316,7 +316,9 @@ checkAuth();
     status.textContent='Обмениваем код VK ID…';
     window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:location.origin+'/vk-auth',state:data.state,codeVerifier:data.codeVerifier,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
     const token=await window.VKIDSDK.Auth.exchangeCode(data.code,data.device_id,data.codeVerifier);
+    vkDiag('TOKEN_EXCHANGE_SUCCESS',{hasAccessToken:!!token?.access_token,hasRefreshToken:!!token?.refresh_token,hasDeviceId:!!(token?.device_id||data.device_id)});
     await showConnected(token,data.device_id);
+    vkDiag('VK_AUTH_COMPLETED',{profileLoaded:true,hasAccessToken:!!token?.access_token});
     sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
     if(vkAuthChannel){vkAuthChannel.close();vkAuthChannel=null}
     if(vkPip&&!vkPip.closed)vkPip.close();
