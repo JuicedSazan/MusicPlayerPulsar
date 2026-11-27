@@ -285,9 +285,29 @@ $('vkMusicConnect').onclick=async()=>{
   const profile=await window.VKIDSDK.Auth.userInfo(vkAccessToken);
   const user=profile?.user||profile||{};
   const displayName=[user.first_name,user.last_name].filter(Boolean).join(' ')||('ID '+(user.user_id||user.id||'VK'));
-  status.textContent='VK ID: '+displayName+' — подключён';status.dataset.state='connected';
-  button.textContent='✓　VK подключён';
-  button.title='Авторизация VK ID выполнена. Доступ к VK Музыке проверим отдельно.';
+  status.textContent='VK ID: '+displayName+' — проверяю доступ к VK Музыке…';status.dataset.state='checking';
+  button.textContent='✓　VK ID подключён';
+  button.title='VK ID авторизация выполнена; проверяем совместимость токена с Audio API.';
+  try{
+   const probe=await fetch('/api/vk/id-probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:vkAccessToken,user_agent:navigator.userAgent}),cache:'no-store'});
+   const result=await probe.json();
+   console.info('[Pulsar VK ID / Audio API experiment]',result);
+   if(result.connected){
+    status.textContent='VK ID: '+displayName+' — доступ к VK Музыке подтверждён';
+    status.dataset.state='connected';$('vkMusicSettings').textContent='✓　VK Music через VK ID';
+   }else{
+    const parts=[];
+    if(result.user_info)parts.push('профиль OK');
+    if(result.audio_search)parts.push('поиск аудио OK');else parts.push('поиск аудио недоступен');
+    if(result.recommendations)parts.push('рекомендации OK');else parts.push('рекомендации не проверены/недоступны');
+    status.textContent='VK ID подключён; VK Audio API: '+parts.join(', ')+'. Подробности в консоли.';
+    status.dataset.state='warning';
+   }
+  }catch(error){
+   console.error('VK ID / Audio API probe failed:',error);
+   status.textContent='VK ID подключён, но эксперимент VK Audio API завершился ошибкой: '+(error?.message||'ошибка сети');
+   status.dataset.state='error';
+  }
  };
  const sdkReady=()=>{
   if(window.VKIDSDK)return true;
