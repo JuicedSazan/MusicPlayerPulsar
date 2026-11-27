@@ -409,7 +409,7 @@ $('vkMusicConnect').onclick=async()=>{
    }else if(sdkReady()){
     button.disabled=true;status.textContent='Завершаем авторизацию VK…';
     try{
-     window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state:savedState,codeVerifier:savedVerifier,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
+     window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state:savedState,codeVerifier:savedVerifier,mode:window.VKIDSDK.ConfigAuthMode.Redirect,responseMode:window.VKIDSDK.ConfigResponseMode.Redirect});
      window.VKIDSDK.Auth.exchangeCode(returnedCode,returnedDevice).then(token=>showConnected(token,returnedDevice)).catch(error=>{
       console.error('VK ID token exchange failed:',error);
       status.textContent='VK ID: ошибка обмена кода — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';
@@ -427,13 +427,14 @@ $('vkMusicConnect').onclick=async()=>{
   const state=randomString(32),codeVerifier=randomString(64);
   try{
    sessionStorage.setItem(STATE_KEY,state);sessionStorage.setItem(VERIFIER_KEY,codeVerifier);
-   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier,mode:window.VKIDSDK.ConfigAuthMode.InNewTab,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
-   const authResponse=await window.VKIDSDK.Auth.login({lang:'ru'});
-   if(!authResponse?.code||!authResponse?.device_id)throw new Error('VK ID не вернул код авторизации');
-   status.textContent='Обмениваем код VK ID…';
-   const token=await window.VKIDSDK.Auth.exchangeCode(authResponse.code,authResponse.device_id,codeVerifier);
-   await showConnected(token,authResponse.device_id);
-   sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
+   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier,mode:window.VKIDSDK.ConfigAuthMode.Redirect,responseMode:window.VKIDSDK.ConfigResponseMode.Redirect});
+   status.textContent='Переходим на страницу VK ID…';
+   window.VKIDSDK.Auth.login({lang:'ru'}).catch(error=>{
+    sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
+    console.error('VK ID redirect failed:',error);
+    status.textContent='VK ID: не удалось открыть авторизацию — '+(error?.message||'неизвестная ошибка');
+    status.dataset.state='error';button.disabled=false;
+   });
   }catch(error){
    sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
    console.error('VK ID authorization start failed:',error);
