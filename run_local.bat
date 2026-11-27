@@ -65,7 +65,11 @@ echo [2/5] Installing dependencies...
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 goto :error
 
-echo [3/5] Installing Chromium for local VK login...\n".venv\\Scripts\\python.exe" -m playwright install chromium\nif errorlevel 1 goto :error\n\necho [4/5] Preparing trusted localhost certificate...
+echo [3/5] Installing Chromium for local VK login...
+".venv\Scripts\python.exe" -m playwright install chromium
+if errorlevel 1 goto :error
+
+echo [4/5] Preparing trusted localhost certificate...
 mkcert -install
 if errorlevel 1 goto :error
 if not exist "localhost+2.pem" (
@@ -78,7 +82,8 @@ echo [5/5] Starting Pulsar over HTTPS...
 echo Open https://localhost
 echo Keep this window open. Press Ctrl+C to stop.
 echo.
-set "PULSE_LOCAL_VK_BROWSER=1"\nset "PULSE_COOKIE_SECURE=1"
+set "PULSE_LOCAL_VK_BROWSER=1"
+set "PULSE_COOKIE_SECURE=1"
 set "PULSE_REQUIRE_HTTPS=1"
 set "PORT=443"
 ".venv\Scripts\python.exe" server.py
