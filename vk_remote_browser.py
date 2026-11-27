@@ -6,6 +6,8 @@ client. This is a prototype: profiles live only as long as the Render instance.
 import base64
 import queue
 import threading
+import os
+from pathlib import Path
 
 
 _BROWSER_SLOT = threading.BoundedSemaphore(1)
@@ -38,6 +40,13 @@ class VKRemoteBrowser:
             with sync_playwright() as p:
                 # Explicit channel uses the full Chromium binary in headless mode,
                 # not Playwright's separate chromium_headless_shell executable.
+                executable = Path(p.chromium.executable_path)
+                if not executable.is_file():
+                    raise RuntimeError(
+                        "Chromium не установлен в runtime. Ожидаемый файл: "
+                        + str(executable) + "; PLAYWRIGHT_BROWSERS_PATH="
+                        + repr(os.environ.get("PLAYWRIGHT_BROWSERS_PATH"))
+                    )
                 browser = p.chromium.launch(
                     channel="chromium",
                     headless=True,
