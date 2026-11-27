@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
-from flask import Flask, jsonify, request, send_from_directory, make_response, abort
+from flask import Flask, jsonify, request, send_from_directory, make_response, abort, Response
 
 ROOT = Path(__file__).resolve().parent
 DATA_ROOT = Path(os.environ.get("PULSE_DATA_DIR", "/tmp/pulsar"))
@@ -708,6 +708,57 @@ def api_vk_stream():
         return jsonify({"stream_url": item["stream_url"]})
     except Exception as exc:
         return api_error("Не удалось обновить ссылку на аудио VK: " + str(exc)[:350], 502)
+
+
+@app.get("/api/vk/audio")
+def api_vk_audio():
+    """Proxy VK audio through localhost so browser playback is not blocked by CDN CORS."""
+    owner_id = str(request.args.get("owner_id") or "").strip()
+    track_id = str(request.args.get("track_id") or "").strip()
+    if not re.fullmatch(r"-?\\d+", owner_id) or not re.fullmatch(r"\\d+", track_id):
+        return api_error("Некорректный идентификатор VK-трека.")
+    s = state()
+    with s["lock"]:
+        service = s.get("vk_service")
+    if not service:
+        return api_error("VK Music не подключена в этой сессии.", 401)
+    try:
+        songs = service.get_songs_by_id([owner_id + "_" + track_id]) or []
+        song = next((x for x in songs if getattr(x, "url", None)), None)
+        if not song:
+            return api_error("VK не вернул ссылку на аудио этого трека.", 404)
+        stream_url = str(song.url)
+        parsed = urlparse(stream_url)
+        if parsed.scheme != "https" or not (parsed.hostname or "").endswith(("okcdn.ru", "userapi.com", "vkuseraudio.net")):
+            return api_error("VK вернул неподдерживаемый аудио-хост.", 502)
+
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36"}
+        range_header = request.headers.get("Range")
+        if range_header:
+            headers["Range"] = range_header
+        upstream_req = urllib.request.Request(stream_url, headers=headers, method="GET")
+        upstream = urllib.request.urlopen(upstream_req, timeout=30)
+        response_headers = {}
+        for name in ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag"):
+            value = upstream.headers.get(name)
+            if value:
+                response_headers[name] = value
+        response_headers["Cache-Control"] = "no-store"
+        def generate():
+            try:
+                while True:
+                    chunk = upstream.read(256 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                upstream.close()
+        return Response(generate(), status=getattr(upstream, "status", 200),
+                        headers=response_headers, direct_passthrough=True)
+    except urllib.error.HTTPError as exc:
+        return api_error("VK CDN отклонил запрос аудио: HTTP " + str(exc.code), 502)
+    except Exception as exc:
+        return api_error("Не удалось передать аудио VK: " + str(exc)[:250], 502)
 
 
 @app.get("/api/vk/recommendations")
