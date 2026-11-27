@@ -350,7 +350,8 @@ checkAuth();
    let pipStep=0;const pipDiag=(step,details={})=>{const line='['+(++pipStep)+'] '+step+' '+JSON.stringify(details);diagBox.textContent+='\n'+line;diagBox.scrollTop=diagBox.scrollHeight;vkDiag('PIP_'+step,details);try{vkAuthChannel?.postMessage({type:'PULSAR_VK_DIAG',step,details})}catch(error){vkDiag('DIAG_RELAY_FAILED',{message:error.message})}};
    frame.addEventListener('load',()=>{
     pipDiag('IFRAME_LOAD',{src:frame.src,frameOrigin:frame.contentWindow.location.origin,mainOrigin:location.origin});
-    try{vkAuthChannel.postMessage({type:'PULSAR_VK_INIT',appId:APP_ID,redirectUrl:location.origin+'/vk-auth',state,codeVerifier,nonce:vkPipNonce,channelName});pipDiag('INIT_BROADCAST_SENT',{channelName,redirectUrl:location.origin+'/vk-auth'})}catch(error){pipDiag('INIT_BROADCAST_FAILED',{name:error.name,message:error.message})}
+    try{const redirectUrl=location.origin+'/vk-auth?channel='+encodeURIComponent(channelName);
+    vkAuthChannel.postMessage({type:'PULSAR_VK_INIT',appId:APP_ID,redirectUrl,state,codeVerifier,nonce:vkPipNonce,channelName});pipDiag('INIT_BROADCAST_SENT',{channelName,redirectUrl,mode:'Redirect'})}catch(error){pipDiag('INIT_BROADCAST_FAILED',{name:error.name,message:error.message})}
    });
    frame.addEventListener('error',event=>pipDiag('IFRAME_ERROR',{message:event.message||'iframe error'}));
    pipDiag('IFRAME_NAVIGATING',{src:'/vk-auth?channel='+encodeURIComponent(channelName)});
