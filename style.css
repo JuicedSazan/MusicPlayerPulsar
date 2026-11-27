@@ -532,3 +532,16 @@ body[data-theme="dark"] .search-dropdown .search-result:hover{background:#1b3452
 #vkAuthStatus[data-state="connected"]{color:#3b9b70}
 #vkAuthStatus[data-state="error"]{color:#d46b6b;white-space:normal}
 #vkLoginBtn:disabled{opacity:.6;cursor:wait}
+
+/* VK Music integration */
+.search-input-row{display:flex;align-items:center;gap:7px;width:100%}
+.search-input-row select{height:42px;flex:0 0 104px;border:1px solid #dedfd7;border-radius:11px;background:#fff;padding:0 10px;font-size:11px;font-weight:750;color:#45483f}
+.search-input-row input{flex:1;min-width:0}
+.vk-music-panel{margin:8px 0 12px;padding:12px;background:#f7f8f2;border:1px solid var(--line);border-radius:10px}
+.vk-music-panel[hidden]{display:none}
+.vk-music-panel p{font-size:10px;line-height:1.5;color:#777b6e;margin:0 0 9px}
+.vk-music-panel input,.vk-music-panel textarea{display:block;width:100%;margin:7px 0;padding:9px;border:1px solid var(--line);border-radius:7px;background:#fff;font:11px inherit;resize:vertical}
+.vk-music-panel button{width:100%;border:0;border-radius:7px;padding:10px;background:var(--accent);font-size:9px;font-weight:850}
+#vkMusicMessage{font-size:10px;line-height:1.45;margin-top:8px;color:#777b6e}
+#vkMusicMessage[data-state="connected"]{color:#567000}
+#vkMusicMessage[data-state="error"]{color:#b33b2f}
