@@ -270,23 +270,63 @@ checkAuth();
    }
   }
  }
- button.addEventListener('click',async()=>{
+ const startVkAuth=async()=>{
   if(!sdkReady())return;
   button.disabled=true;status.textContent='Открываем авторизацию VK…';
   const state=randomString(32),codeVerifier=randomString(64);
   try{
    sessionStorage.setItem(STATE_KEY,state);sessionStorage.setItem(VERIFIER_KEY,codeVerifier);
-   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier,mode:window.VKIDSDK.ConfigAuthMode.InNewTab,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
+   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier,mode:window.VKIDSDK.ConfigAuthMode.InNewWindow,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
    const authResponse=await window.VKIDSDK.Auth.login({lang:'ru'});
    if(!authResponse?.code||!authResponse?.device_id)throw new Error('VK ID не вернул код авторизации');
    status.textContent='Обмениваем код VK ID…';
    const token=await window.VKIDSDK.Auth.exchangeCode(authResponse.code,authResponse.device_id,codeVerifier);
    await showConnected(token,authResponse.device_id);
    sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
+   if(vkPip&&!vkPip.closed)vkPip.close();vkPip=null;
   }catch(error){
    sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
    console.error('VK ID authorization start failed:',error);
-   status.textContent='VK ID: ошибка запуска входа — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';button.disabled=false;
-  }
+   status.textContent='VK ID: ошибка запуска входа — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';
+  }finally{button.disabled=false}
+ };
+ let vkPip=null,vkOneTap=null;
+ const openVkPip=async()=>{
+  if(!window.documentPictureInPicture?.requestWindow)throw new Error('Document Picture-in-Picture не поддерживается этим браузером');
+  const w=await window.documentPictureInPicture.requestWindow({width:380,height:270});
+  vkPip=w;
+  const d=w.document;d.title='Pulsar — вход через VK ID';
+  d.body.innerHTML=`<style>
+   *{box-sizing:border-box}body{margin:0;padding:20px;background:#f5f7fb;color:#17263b;font:13px Arial,sans-serif}
+   .brand{font-size:11px;letter-spacing:2px;font-weight:800;margin-bottom:18px;color:#29496d}
+   h2{font-size:17px;margin:0 0 7px}p{font-size:12px;line-height:1.5;color:#65758b;margin:0 0 17px}
+   #vkOneTap{min-height:48px;display:flex;justify-content:center;align-items:center}
+   #vkOneTap iframe{max-width:100%}
+   .divider{display:flex;align-items:center;gap:9px;color:#98a4b4;font-size:10px;margin:13px 0}
+   .divider:before,.divider:after{content:"";height:1px;background:#dce3ed;flex:1}
+   #vkFallback{width:100%;border:0;border-radius:10px;padding:12px;background:#2787f5;color:white;font-weight:700;cursor:pointer}
+   #pipStatus{font-size:10px;color:#8290a2;margin-top:13px;min-height:14px}
+  </style>
+  <div class="brand">PULSAR / VK ID</div><h2>Вход в Пульс</h2><p>Авторизуйся через официальный виджет VK ID. Если виджет не сработает, используй запасной способ ниже.</p>
+  <div id="vkOneTap"></div><div class="divider">ИЛИ</div><button id="vkFallback" type="button">Открыть авторизацию VK ID</button><div id="pipStatus">Загружаем виджет VK ID…</div>`;
+  d.getElementById('vkFallback').addEventListener('click',()=>startVkAuth());
+  w.addEventListener('pagehide',()=>{if(vkPip===w)vkPip=null;if(vkOneTap){try{vkOneTap.close()}catch{}vkOneTap=null}});
+  try{
+   const state=randomString(32),codeVerifier=randomString(64);
+   sessionStorage.setItem(STATE_KEY,state);sessionStorage.setItem(VERIFIER_KEY,codeVerifier);
+   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier,mode:window.VKIDSDK.ConfigAuthMode.InNewWindow,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
+   vkOneTap=new window.VKIDSDK.OneTap();
+   vkOneTap.render({container:d.getElementById('vkOneTap'),scheme:window.VKIDSDK.Scheme.LIGHT,lang:window.VKIDSDK.Languages.RUS,showAlternativeLogin:true})
+    .on(window.VKIDSDK.WidgetEvents.LOAD,()=>{d.getElementById('pipStatus').textContent='Выбери способ входа в виджете VK ID.'})
+    .on(window.VKIDSDK.WidgetEvents.ERROR,error=>{console.error('VK OneTap widget error:',error);d.getElementById('pipStatus').textContent='Виджет не загрузился. Используй запасную кнопку.'});
+  }catch(error){console.error('VK OneTap widget init failed:',error);d.getElementById('pipStatus').textContent='Не удалось встроить виджет. Используй запасную кнопку.'}
+  return w;
+ };
+ button.addEventListener('click',async()=>{
+  if(!sdkReady())return;
+  button.disabled=true;status.textContent='Открываем плавающее окно VK ID…';
+  try{await openVkPip();status.textContent='VK ID открыт в плавающем окне.';status.dataset.state='pending'}
+  catch(error){console.warn('VK PiP unavailable; falling back to VK popup:',error);status.textContent='PiP недоступен — открываем окно VK ID…';await startVkAuth()}
+  finally{button.disabled=false}
  });
 })();
