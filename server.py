@@ -426,6 +426,54 @@ def api_vk_id_probe():
         return jsonify(result), 200
 
 
+@app.post("/api/vk/web-token-probe")
+def api_vk_web_token_probe():
+    """One-shot VK web-token test. Cookie values and token are never logged or persisted."""
+    payload = request.get_json(silent=True) or {}
+    remixsid = str(payload.get("remixsid") or "").strip()
+    cookie_p = str(payload.get("p") or "").strip()
+    if not remixsid or not cookie_p:
+        return api_error("Нужны оба cookie: remixsid и p.")
+    if any(c in remixsid + cookie_p for c in "\\r\\n;") or len(remixsid) > 10000 or len(cookie_p) > 10000:
+        return api_error("Некорректный формат cookie.")
+    import urllib.parse
+    import urllib.request
+    form = urllib.parse.urlencode({"version": "1", "app_id": "6287487"}).encode()
+    req = urllib.request.Request(
+        "https://login.vk.ru/?act=web_token",
+        data=form,
+        headers={
+            "User-Agent": request.headers.get("User-Agent", "Mozilla/5.0"),
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": "https://vk.ru",
+            "Referer": "https://vk.ru/",
+            "Cookie": f"remixsid={remixsid}; p={cookie_p}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        if data.get("type") != "okay" or not isinstance(data.get("data"), dict):
+            info = str(data.get("error_info") or data.get("type") or "неизвестный ответ")
+            return jsonify({"ok": False, "error": "VK не выдал веб-токен: " + info[:250]}), 401
+        token_data = data["data"]
+        token = str(token_data.get("access_token") or "")
+        if not token:
+            return api_error("VK ответил без access_token.", 502)
+        expires = int(token_data.get("expires") or 0)
+        # Deliberately discard token and cookies after confirming issuance.
+        return jsonify({
+            "ok": True,
+            "user_id": token_data.get("user_id"),
+            "expires_at": expires,
+            "expires_in_seconds": max(0, expires - int(time.time())) if expires else None,
+            "message": "Веб-токен успешно получен. Для этого теста он не сохранён.",
+        })
+    except Exception as exc:
+        return api_error("Ошибка запроса веб-токена VK: " + str(exc)[:250], 502)
+
+
 @app.post("/api/vk/connect")
 def api_vk_connect():
     if VKMusicService is None:
