@@ -469,7 +469,6 @@ def api_vk_oauth_exchange():
         "code": code,
         "code_verifier": code_verifier,
         "device_id": device_id,
-        "state": state_value,
     }).encode("utf-8")
     req = urllib.request.Request(
         "https://id.vk.ru/oauth2/auth", data=form,
