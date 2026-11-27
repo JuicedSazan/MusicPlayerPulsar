@@ -443,6 +443,27 @@ def api_vk_search():
         return api_error("Поиск VK Music не удался: " + str(exc)[:350], 502)
 
 
+@app.get("/api/vk/stream")
+def api_vk_stream():
+    owner_id = str(request.args.get("owner_id") or "").strip()
+    track_id = str(request.args.get("track_id") or "").strip()
+    if not re.fullmatch(r"-?\\d+", owner_id) or not re.fullmatch(r"\\d+", track_id):
+        return api_error("Некорректный идентификатор VK-трека.")
+    s = state()
+    with s["lock"]:
+        service = s.get("vk_service")
+    if not service:
+        return api_error("VK Music не подключена в этой сессии.", 401)
+    try:
+        songs = service.get_songs_by_id([owner_id + "_" + track_id]) or []
+        item = next((_vk_track_item(song) for song in songs if getattr(song, "url", None)), None)
+        if not item:
+            return api_error("VK не вернул ссылку на аудио этого трека.", 404)
+        return jsonify({"stream_url": item["stream_url"]})
+    except Exception as exc:
+        return api_error("Не удалось обновить ссылку на аудио VK: " + str(exc)[:350], 502)
+
+
 @app.get("/api/vk/recommendations")
 def api_vk_recommendations():
     s = state()
