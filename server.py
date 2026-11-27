@@ -12,6 +12,8 @@ import shutil
 import threading
 import time
 import uuid
+import urllib.error
+import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
