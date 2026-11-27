@@ -729,7 +729,9 @@ def api_vk_audio():
             return api_error("VK не вернул ссылку на аудио этого трека.", 404)
         stream_url = str(song.url)
         parsed = urlparse(stream_url)
-        if parsed.scheme != "https" or not (parsed.hostname or "").endswith(("okcdn.ru", "userapi.com", "vkuseraudio.net")):
+        host = (parsed.hostname or "").lower()
+        allowed_hosts = ("okcdn.ru", "userapi.com", "vkuseraudio.net")
+        if parsed.scheme != "https" or not any(host == domain or host.endswith("." + domain) for domain in allowed_hosts):
             return api_error("VK вернул неподдерживаемый аудио-хост.", 502)
 
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36"}
