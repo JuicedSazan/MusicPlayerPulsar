@@ -278,6 +278,23 @@ async function vkBrowserAction(endpoint, buttonId, messageId, initialText) {
 $('vkBrowserLogin').onclick=()=>vkBrowserAction('/api/vk/browser-login','vkBrowserLogin','vkBrowserMessage','Открываю отдельное окно VK…');
 $('vkBrowserProbe').onclick=()=>vkBrowserAction('/api/vk/browser-token','vkBrowserProbe','vkBrowserMessage','Проверяю локальную сессию VK…');
 
+$('vkInspectAudio').onclick=async()=>{
+ const button=$('vkInspectAudio'),output=$('vkInspectAudioMessage');
+ button.disabled=true;output.textContent='Открываю официальный веб-клиент VK Музыки и анализирую сетевые запросы…';output.dataset.state='';
+ try{
+  const r=await fetch('/api/vk/inspect-audio',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',cache:'no-store',credentials:'same-origin'});
+  const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Исследование не выполнено');
+  const summary={page:d.page,logged_in_session_detected:d.logged_in_session_detected,request_count:d.request_count,navigation_error:d.navigation_error,secrets_included:false,requests:d.requests||[]};
+  output.textContent='Исследование завершено. Найдено запросов: '+(d.request_count||0)+'. Авторизованная сессия: '+(d.logged_in_session_detected?'обнаружена':'не обнаружена')+'. Подробная безопасная структура запросов выведена в консоль разработчика (F12 → Console).'+(d.navigation_error?' Ошибка навигации: '+d.navigation_error:'');
+  output.dataset.state=d.request_count?'connected':'error';
+  console.group('[Pulsar VK Music web inspection]');
+  console.info('Request metadata and response shapes only; no cookies, tokens, request values or audio URLs.',summary);
+  console.table((d.requests||[]).map(x=>({method:x.method,host:x.host,path:x.path,status:x.status,resource_type:x.resource_type,query_keys:(x.query_keys||[]).join(', '),post_fields:(x.post_field_names||[]).join(', '),response_keys:(x.response_shape?.top_level_keys||[]).join(', ')})));
+  console.groupEnd();
+ }catch(e){output.textContent=e.message;output.dataset.state='error'}
+ finally{button.disabled=false}
+};
+
 $('vkBrowserCookieProbe').onclick=async()=>{
  const button=$('vkBrowserCookieProbe'),output=$('vkBrowserCookieMessage');
  button.disabled=true;output.textContent='Проверяю доступ к VK из браузера…';output.dataset.state='';
