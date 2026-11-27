@@ -373,6 +373,7 @@ def api_vk_id_probe():
     payload = request.get_json(silent=True) or {}
     token = str(payload.get("access_token") or "").strip()
     user_agent = str(payload.get("user_agent") or "").strip()
+    supplied_user_id = payload.get("user_id")
     if not token or not user_agent:
         return api_error("Не хватает VK ID access token или User-Agent.")
     if len(token) > 12000 or len(user_agent) > 1500:
@@ -398,6 +399,11 @@ def api_vk_id_probe():
             result["audio_search_count"] = len(found)
         except Exception as exc:
             result["details"].append("audio search: " + str(exc)[:220])
+        if not user_id and supplied_user_id:
+            try:
+                user_id = int(supplied_user_id)
+            except (TypeError, ValueError):
+                user_id = None
         if user_id:
             try:
                 recommended = service.get_recommendations(user_id=int(user_id), count=1, offset=0) or []
@@ -405,7 +411,7 @@ def api_vk_id_probe():
                 result["recommendations_count"] = len(recommended)
             except Exception as exc:
                 result["details"].append("recommendations: " + str(exc)[:220])
-        if result["user_info"] and result["audio_search"]:
+        if result["audio_search"]:
             session = state()
             with session["lock"]:
                 session["vk_service"] = service
