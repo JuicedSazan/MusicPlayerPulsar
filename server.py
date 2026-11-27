@@ -34,11 +34,17 @@ try:
 except Exception:
     Client = None
 
+try:
+    from vkpymusic import Service as VKMusicService
+except Exception:
+    VKMusicService = None
+
 
 def _new_session():
     return {
         "client": None, "auth": "idle", "auth_url": "", "auth_code": "",
-        "auth_error": "", "auth_generation": 0, "jobs": {}, "last_seen": time.time(),
+        "auth_error": "", "auth_generation": 0, "vk_service": None, "vk_user_id": None,
+        "jobs": {}, "last_seen": time.time(),
         "lock": threading.RLock(), "cache_dir": None,
     }
 
@@ -357,6 +363,102 @@ def api_search():
         }})
     except Exception as exc:
         return api_error("Поиск не удался: " + str(exc)[:350], 502)
+
+
+@app.post("/api/vk/connect")
+def api_vk_connect():
+    if VKMusicService is None:
+        return api_error("VKpyMusic не установлена на сервере. Проверь зависимости.", 503)
+    payload = request.get_json(silent=True) or {}
+    token = str(payload.get("token") or "").strip()
+    user_agent = str(payload.get("user_agent") or "").strip()
+    if not token or not user_agent:
+        return api_error("Нужны токен VK Music и соответствующий User-Agent.")
+    if len(token) > 12000 or len(user_agent) > 1500:
+        return api_error("Проверь длину токена и User-Agent.")
+    try:
+        service = VKMusicService(user_agent, token)
+        info = service.get_user_info()
+        user_id = getattr(info, "userid", None)
+        if not user_id:
+            raise RuntimeError("VK не вернул ID пользователя.")
+        s = state()
+        with s["lock"]:
+            s["vk_service"] = service
+            s["vk_user_id"] = int(user_id)
+        return jsonify({"ok": True, "user": {
+            "id": int(user_id),
+            "name": " ".join(filter(None, [getattr(info, "first_name", ""), getattr(info, "last_name", "")])) or "VK"
+        }})
+    except Exception as exc:
+        return api_error("Не удалось подключить VK Music: " + str(exc)[:350], 401)
+
+
+@app.post("/api/vk/disconnect")
+def api_vk_disconnect():
+    s = state()
+    with s["lock"]:
+        s["vk_service"] = None
+        s["vk_user_id"] = None
+    return jsonify({"ok": True})
+
+
+def _vk_track_item(song):
+    title = getattr(song, "title", None) or "Неизвестный трек"
+    artist = getattr(song, "artist", None) or "Исполнитель не определён"
+    owner_id = str(getattr(song, "owner_id", "") or "")
+    track_id = str(getattr(song, "track_id", "") or "")
+    stream_url = str(getattr(song, "url", "") or "")
+    if not stream_url:
+        return None
+    return {
+        "id": "vk:" + owner_id + "_" + track_id,
+        "track_id": track_id, "owner_id": owner_id,
+        "title": title, "artist": artist,
+        "duration": int(getattr(song, "duration", 0) or 0) * 1000,
+        "cover": "", "url": "https://vk.com/audio" + owner_id + "_" + track_id,
+        "stream_url": stream_url, "provider": "vk"
+    }
+
+
+@app.get("/api/vk/search")
+def api_vk_search():
+    query = (request.args.get("q") or "").strip()
+    if len(query) < 2:
+        return jsonify({"results": []})
+    s = state()
+    with s["lock"]:
+        service = s.get("vk_service")
+    if not service:
+        return api_error("Сначала подключи VK Music в настройках Пульсара.", 401)
+    try:
+        started = time.perf_counter()
+        songs = service.search_songs_by_text(query, count=30, offset=0) or []
+        items = [item for song in songs if (item := _vk_track_item(song))]
+        return jsonify({"results": items, "timings": {
+            "search_total_ms": round((time.perf_counter() - started) * 1000),
+            "results": len(items)
+        }})
+    except Exception as exc:
+        return api_error("Поиск VK Music не удался: " + str(exc)[:350], 502)
+
+
+@app.get("/api/vk/recommendations")
+def api_vk_recommendations():
+    s = state()
+    with s["lock"]:
+        service, user_id = s.get("vk_service"), s.get("vk_user_id")
+    if not service or not user_id:
+        return api_error("Сначала подключи VK Music в настройках Пульсара.", 401)
+    try:
+        started = time.perf_counter()
+        songs = service.get_recommendations(user_id=user_id, count=50, offset=0) or []
+        items = [item for song in songs if (item := _vk_track_item(song))]
+        return jsonify({"title": "Музыкальные рекомендации для вас", "tracks": items,
+                        "timings": {"total_ms": round((time.perf_counter() - started) * 1000),
+                                    "results": len(items)}})
+    except Exception as exc:
+        return api_error("Не удалось получить рекомендации VK: " + str(exc)[:350], 502)
 
 
 @app.get("/api/playlist")
