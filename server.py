@@ -445,6 +445,58 @@ def api_search():
         return api_error("Поиск не удался: " + str(exc)[:350], 502)
 
 
+@app.post("/api/vk/official-api-probe")
+def api_vk_official_api_probe():
+    """Experimental: probe standard VK API methods with a user-supplied API access token."""
+    payload = request.get_json(silent=True) or {}
+    token = str(payload.get("access_token") or "").strip()
+    if not token or len(token) > 12000:
+        return api_error("Введи действительный токен доступа VK API.")
+    import urllib.parse
+    import urllib.request
+
+    def call_vk(method, params=None):
+        values = {"access_token": token, "v": "5.199"}
+        values.update(params or {})
+        body = urllib.parse.urlencode(values).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.vk.com/method/" + method,
+            data=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded",
+                     "User-Agent": "Pulsar/1.0"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=18) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        if "error" in data:
+            err = data["error"] or {}
+            raise RuntimeError("VK API Error " + str(err.get("error_code", "?")) +
+                               ": " + str(err.get("error_msg", "Unknown error"))[:180])
+        return data.get("response")
+
+    result = {"ok": True, "token_received": True, "profile": False,
+              "audio_search": False, "details": []}
+    try:
+        profile = call_vk("users.get", {"fields": "first_name,last_name"})
+        if isinstance(profile, list) and profile:
+            user = profile[0]
+            result["profile"] = True
+            result["user_id"] = user.get("id")
+            result["display_name"] = " ".join(filter(None, [
+                user.get("first_name"), user.get("last_name")
+            ])) or "VK"
+    except Exception as exc:
+        result["details"].append("users.get: " + str(exc)[:220])
+    try:
+        tracks = call_vk("audio.search", {"q": "Daft Punk", "count": 1})
+        result["audio_search"] = isinstance(tracks, dict) and bool(tracks.get("items"))
+        result["audio_search_count"] = len(tracks.get("items", [])) if isinstance(tracks, dict) else 0
+    except Exception as exc:
+        result["details"].append("audio.search: " + str(exc)[:220])
+    result["connected"] = bool(result["profile"] and result["audio_search"])
+    return jsonify(result)
+
+
 @app.post("/api/vk/id-probe")
 def api_vk_id_probe():
     """Experimental: test whether a VK ID OAuth token also grants VK Audio API access."""
