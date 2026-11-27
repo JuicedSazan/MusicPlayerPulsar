@@ -445,6 +445,87 @@ def api_search():
         return api_error("Поиск не удался: " + str(exc)[:350], 502)
 
 
+@app.post("/api/vk/oauth-exchange")
+def api_vk_oauth_exchange():
+    """Exchange a VK ID authorization code server-side, avoiding browser CORS."""
+    payload = request.get_json(silent=True) or {}
+    code = str(payload.get("code") or "").strip()
+    code_verifier = str(payload.get("code_verifier") or "").strip()
+    device_id = str(payload.get("device_id") or "").strip()
+    redirect_uri = str(payload.get("redirect_uri") or "").strip()
+    state_value = str(payload.get("state") or "").strip()
+    if not all((code, code_verifier, device_id, redirect_uri, state_value)):
+        return api_error("Не хватает параметров VK ID callback.")
+    if len(code) > 4096 or len(code_verifier) > 256 or len(device_id) > 512 or len(state_value) > 256:
+        return api_error("Некорректная длина параметров VK ID.")
+    parsed_redirect = urlparse(redirect_uri)
+    if parsed_redirect.scheme != "https" or parsed_redirect.netloc != request.host or parsed_redirect.path != "/":
+        return api_error("Redirect URI не совпадает с адресом Pulsar.", 400)
+    import urllib.parse
+    form = urllib.parse.urlencode({
+        "grant_type": "authorization_code",
+        "client_id": "54919699",
+        "redirect_uri": redirect_uri,
+        "code": code,
+        "code_verifier": code_verifier,
+        "device_id": device_id,
+        "state": state_value,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://id.vk.ru/oauth2/auth", data=form,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            token_data = json.loads(response.read().decode("utf-8"))
+        access_token = str(token_data.get("access_token") or "")
+        if not access_token:
+            return jsonify({"ok": False, "error": "VK ID не вернул access_token.", "vk_response": {
+                "error": token_data.get("error"), "error_description": token_data.get("error_description")
+            }}), 502
+        result = {"ok": True, "token_received": True, "user_info": False, "audio_search": False, "details": []}
+        service = VKMusicService(request.headers.get("User-Agent", "Mozilla/5.0"), access_token) if VKMusicService else None
+        if service is None:
+            result["details"].append("VKpyMusic не установлена на сервере.")
+        else:
+            try:
+                info = service.get_user_info()
+                user_id = getattr(info, "userid", None)
+                result["user_info"] = bool(user_id)
+                result["user_id"] = int(user_id) if user_id else None
+                result["display_name"] = " ".join(filter(None, [
+                    getattr(info, "first_name", ""), getattr(info, "last_name", "")
+                ])) or "VK"
+            except Exception as exc:
+                result["details"].append("get_user_info: " + str(exc)[:180])
+            try:
+                found = service.search_songs_by_text("Daft Punk", count=1, offset=0) or []
+                result["audio_search"] = bool(found)
+                result["audio_search_count"] = len(found)
+            except Exception as exc:
+                result["details"].append("audio search: " + str(exc)[:180])
+            if result["audio_search"] and result.get("user_id"):
+                s = state()
+                with s["lock"]:
+                    s["vk_service"] = service
+                    s["vk_user_id"] = result["user_id"]
+                result["connected"] = True
+            else:
+                result["connected"] = False
+        return jsonify(result)
+    except urllib.error.HTTPError as exc:
+        try:
+            error_body = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            error_body = {}
+        return jsonify({"ok": False, "error": "VK ID отклонил обмен authorization code.",
+                        "http_status": exc.code, "vk_error": error_body.get("error"),
+                        "description": error_body.get("error_description")}), 502
+    except Exception as exc:
+        return api_error("Не удалось обменять код VK ID на сервере: " + str(exc)[:180], 502)
+
+
 @app.post("/api/vk/id-probe")
 def api_vk_id_probe():
     """Experimental: test whether a VK ID OAuth token also grants VK Audio API access."""
