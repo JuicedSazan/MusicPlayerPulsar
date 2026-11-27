@@ -821,4 +821,10 @@ def _cleanup_loop():
 threading.Thread(target=_cleanup_loop, daemon=True).start()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8765")), threaded=True)
+    port = int(os.environ.get("PORT", "443"))
+    cert_file = os.environ.get("PULSE_SSL_CERT", str(ROOT / "localhost+2.pem"))
+    key_file = os.environ.get("PULSE_SSL_KEY", str(ROOT / "localhost+2-key.pem"))
+    ssl_context = (cert_file, key_file) if Path(cert_file).is_file() and Path(key_file).is_file() else None
+    if os.environ.get("PULSE_REQUIRE_HTTPS", "0") == "1" and ssl_context is None:
+        raise SystemExit("HTTPS certificate files are missing. Run run_local.bat to create them.")
+    app.run(host="0.0.0.0", port=port, threaded=True, ssl_context=ssl_context)
