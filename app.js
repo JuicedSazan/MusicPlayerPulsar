@@ -281,13 +281,24 @@ $('vkWebTokenProbe').onclick=async()=>{
  const button=$('vkWebTokenProbe'),output=$('vkWebTokenMessage');
  const remixsid=$('vkProbeRemixsid').value.trim(),p=$('vkProbeCookieP').value.trim();
  if(!remixsid){output.textContent='Нужна cookie remixsid.';return}
- button.disabled=true;output.textContent='Сервер запрашивает веб-токен и проверяет VK Audio API…';
+ button.disabled=true;output.textContent='Отправляю один запрос VK с указанными cookies…';
  try{
   const r=await fetch('/api/vk/web-token-probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({remixsid,p}),cache:'no-store',credentials:'same-origin'});
-  const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Проверка не пройдена');
+  const d=await r.json();
   $('vkProbeRemixsid').value='';$('vkProbeCookieP').value='';
-  output.textContent='Токен: получен. Поиск VK Audio: '+(d.audio_search?'работает':'не подтверждён')+'. VK Mix: '+(d.recommendations?'работает':'не подтверждён')+'. ID: '+(d.user_id||'—')+'. Срок токена: '+(d.expires_in_seconds??'—')+' сек. '+d.message+(d.details?.length?' Детали: '+d.details.join(' | '):'');
- }catch(e){output.textContent=e.message}
+  if(!r.ok||!d.ok){
+   let message=d.error||'Проверка не пройдена';
+   const diag=d.diagnostics||{};
+   if(diag.retry_after_seconds)message+=' Повторить можно не раньше чем через '+Math.ceil(diag.retry_after_seconds/60)+' мин. (защитная пауза сервера).';
+   if(Object.keys(diag).length)message+='\nДиагностика: '+JSON.stringify(diag,null,2);
+   output.textContent=message;output.dataset.state='error';return;
+  }
+  const mins=d.expires_in_seconds==null?'—':Math.floor(d.expires_in_seconds/60)+' мин.';
+  const search=d.audio_search?'работает ('+(d.audio_search_count||0)+')':'не подтверждён';
+  const recs=d.recommendations?'работают ('+(d.recommendations_count||0)+')':'не подтверждены';
+  output.textContent='Токен: получен. Поиск VK Audio: '+search+'. VK Mix: '+recs+'. ID: '+(d.user_id||'—')+'. Срок токена: '+mins+'. '+d.message+'\nДиагностика: '+JSON.stringify(d.diagnostics||{},null,2)+(d.details?.length?'\nПодробности: '+d.details.join(' | '):'');
+  output.dataset.state=d.audio_search?'connected':'error';
+ }catch(e){output.textContent='Ошибка связи с сервером: '+e.message;output.dataset.state='error'}
  finally{button.disabled=false}
 };
 
