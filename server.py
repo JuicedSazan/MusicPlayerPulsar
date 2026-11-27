@@ -471,6 +471,7 @@ def api_vk_remote_finish():
                         "audio_search": audio_search,
                         "message": "Сессия VK подключена. Токен хранится только на сервере."})
     except Exception as exc:
+        keep_open = True
         return api_error("Не удалось завершить авторизацию VK: " + str(exc)[:220], 502)
     finally:
         if not keep_open:
@@ -1450,7 +1451,15 @@ def _cleanup_loop():
             expired = [(sid, s) for sid, s in _sessions.items() if s["last_seen"] < cutoff]
             for sid, _ in expired: _sessions.pop(sid, None)
         for sid, s in expired:
-            with s["lock"]: s.update(client=None, jobs={})
+            with s["lock"]:
+                remote_browser = s.get("vk_remote_browser")
+                s["vk_remote_browser"] = None
+                s.update(client=None, jobs={})
+            if remote_browser:
+                try:
+                    remote_browser.close()
+                except Exception:
+                    pass
             shutil.rmtree(CACHE_ROOT / sid, ignore_errors=True)
 
 
