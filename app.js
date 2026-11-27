@@ -267,8 +267,10 @@ async function vkBrowserAction(endpoint, buttonId, messageId, initialText) {
    output.textContent=d.message;
   } else {
    const mins=d.expires_in_seconds==null?'—':Math.floor(d.expires_in_seconds/60)+' мин.';
-   output.textContent='Успех! VK выдал веб-токен. ID: '+(d.user_id||'не указан')+'. Срок: '+mins+'. Cookie p '+(d.cookie_p_found?'найдена':'не найдена')+'. Токен не сохранён.';
-   output.dataset.state='connected';
+   const search=d.audio_search?'работает ('+(d.audio_search_count||0)+')':'не работает';
+   const recs=d.recommendations?'работают ('+(d.recommendations_count||0)+')':'не работают';
+   output.textContent='Веб-токен получен. ID: '+(d.user_id||'не указан')+'. Срок: '+mins+'. Поиск: '+search+'. VK Микс: '+recs+'. '+(d.message||'')+(d.details&&d.details.length?' Подробности: '+d.details.join(' | '):'');
+   output.dataset.state=d.connected?'connected':'error';
   }
  } catch(e) { output.textContent=e.message; output.dataset.state='error'; }
  finally { button.disabled=false; }
