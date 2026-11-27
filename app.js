@@ -289,7 +289,7 @@ $('vkMusicConnect').onclick=async()=>{
   button.textContent='✓　VK ID подключён';
   button.title='VK ID авторизация выполнена; проверяем совместимость токена с Audio API.';
   try{
-   const probe=await fetch('/api/vk/id-probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:vkAccessToken,user_agent:navigator.userAgent}),cache:'no-store'});
+   const probe=await fetch('/api/vk/id-probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:vkAccessToken,user_agent:navigator.userAgent,user_id:user.user_id||user.id}),cache:'no-store'});
    const result=await probe.json();
    console.info('[Pulsar VK ID / Audio API experiment]',result);
    if(result.connected){
