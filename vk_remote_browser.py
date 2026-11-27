@@ -8,11 +8,17 @@ import queue
 import threading
 
 
+_BROWSER_SLOT = threading.BoundedSemaphore(1)
+
+
 class VKRemoteBrowser:
     WIDTH = 1280
     HEIGHT = 800
 
     def __init__(self):
+        if not _BROWSER_SLOT.acquire(blocking=False):
+            raise RuntimeError("На бесплатном сервере доступно одно окно авторизации VK одновременно. Попробуй позже.")
+        self._slot_released = False
         self.commands = queue.Queue()
         self.ready = threading.Event()
         self.start_error = None
@@ -20,8 +26,10 @@ class VKRemoteBrowser:
         self.thread = threading.Thread(target=self._run, name="pulsar-vk-remote", daemon=True)
         self.thread.start()
         if not self.ready.wait(75):
+            self._release_slot()
             raise RuntimeError("Тайм-аут запуска удалённого браузера VK.")
         if self.start_error:
+            self._release_slot()
             raise RuntimeError(self.start_error)
 
     def _run(self):
@@ -77,6 +85,11 @@ class VKRemoteBrowser:
             self.start_error = str(exc)[:300]
             self.ready.set()
 
+    def _release_slot(self):
+        if not self._slot_released:
+            self._slot_released = True
+            _BROWSER_SLOT.release()
+
     def _call(self, command, args=None, timeout=25):
         if self.closed:
             raise RuntimeError("Окно авторизации VK уже закрыто.")
@@ -118,3 +131,5 @@ class VKRemoteBrowser:
                 self._call("close", timeout=15)
             except Exception:
                 self.closed = True
+            finally:
+                self._release_slot()
