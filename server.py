@@ -289,10 +289,6 @@ def index():
     return send_from_directory(ROOT, "index.html")
 
 
-@app.get("/vk-auth")
-def vk_auth_page():
-    return send_from_directory(ROOT, "vk-auth.html")
-
 
 @app.get("/<path:filename>")
 def static_files(filename):
