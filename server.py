@@ -408,7 +408,7 @@ def api_login():
 def api_logout():
     s = state()
     with s["lock"]:
-        s.update(client=None, auth="idle", auth_url="", auth_code="", auth_error="", jobs={})
+        s.update(client=None, auth="idle", auth_url="", auth_code="", auth_error="", jobs={}, vk_id_access_token="", vk_id_refresh_token="", vk_id_device_id="", vk_id_expires_at=0, vk_id_state="")
         s["auth_generation"] += 1
     # Remove only this browser's temporary cache.
     if s["cache_dir"]:
