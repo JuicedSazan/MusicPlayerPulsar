@@ -330,6 +330,23 @@ $('vkWebTokenProbe').onclick=async()=>{
  finally{button.disabled=false}
 };
 
+$('vkApiProbe').onclick=async()=>{
+ const button=$('vkApiProbe'),output=$('vkApiProbeMessage'),access_token=$('vkApiAccessToken').value.trim();
+ if(!access_token){output.textContent='Вставь токен доступа VK API.';return}
+ button.disabled=true;output.textContent='Проверяю users.get и audio.search…';output.dataset.state='';
+ try{
+  const r=await fetch('/api/vk/official-api-probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token}),cache:'no-store'});
+  const d=await r.json();$('vkApiAccessToken').value='';
+  if(!r.ok||!d.ok)throw Error(d.error||'Проверка VK API не выполнена');
+  const parts=['Профиль: '+(d.profile?'доступен':'недоступен'),'Поиск аудио: '+(d.audio_search?'работает ('+(d.audio_search_count||0)+')':'недоступен')];
+  if(d.display_name)parts.push('Пользователь: '+d.display_name+' (ID '+d.user_id+')');
+  output.textContent=parts.join('. ')+'.'+(d.details?.length?' Подробности: '+d.details.join(' | '):'');
+  output.dataset.state=d.connected?'connected':'error';
+  console.info('[Pulsar standard VK API probe]',{profile:d.profile,audio_search:d.audio_search,details:d.details||[]});
+ }catch(e){output.textContent=e.message;output.dataset.state='error'}
+ finally{button.disabled=false}
+};
+
 $('vkMusicConnect').onclick=async()=>{
  const token=$('vkMusicToken').value.trim(),user_agent=$('vkMusicUA').value.trim(),button=$('vkMusicConnect');
  if(!token||!user_agent){$('vkMusicMessage').textContent='Заполни оба поля.';return}
