@@ -526,3 +526,9 @@ body.collapsed #showSidebar{border-radius:0 0 24px 0!important}
 body[data-theme="dark"] .search-dropdown{background:#15243a!important;border-color:#355273!important;color:#edf4ff!important}
 body[data-theme="dark"] .search-dropdown .search-status{background:#15243a!important;color:#b8cbe2!important;border:0!important}
 body[data-theme="dark"] .search-dropdown .search-result:hover{background:#1b3452!important}
+
+/* VK ID test connection */
+#vkLoginBtn{margin-top:4px}
+#vkAuthStatus[data-state="connected"]{color:#3b9b70}
+#vkAuthStatus[data-state="error"]{color:#d46b6b;white-space:normal}
+#vkLoginBtn:disabled{opacity:.6;cursor:wait}
