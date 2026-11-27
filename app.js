@@ -210,3 +210,39 @@ applyTheme(localStorage.getItem('pulsarTheme')||'light');
 if(themeButton)themeButton.addEventListener('click',()=>applyTheme(document.body.dataset.theme==='dark'?'light':'dark'));
 
 checkAuth();
+
+
+/* VK ID sign-in test. Tokens stay in memory; no VK secret is exposed to the browser. */
+(function initVkIdTest(){
+ const button=$('vkLoginBtn'),status=$('vkAuthStatus');
+ if(!button||!status)return;
+ const APP_ID=54919699;
+ const REDIRECT_URL=location.origin+'/';
+ let vkAccessToken='',vkRefreshToken='',vkDeviceId='';
+ const randomString=(length)=>{const bytes=new Uint8Array(length);crypto.getRandomValues(bytes);return Array.from(bytes,b=>('0'+(b%36).toString(36)).slice(-1)).join('')};
+ button.addEventListener('click',async()=>{
+  if(!window.VKID){status.textContent='VK ID SDK не загрузился. Проверь подключение к сети.';return}
+  button.disabled=true;status.textContent='Открываем авторизацию VK…';
+  const state=randomString(32),codeVerifier=randomString(64);
+  try{
+   window.VKID.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier});
+   const response=await window.VKID.Auth.login({lang:'ru'});
+   if(!response||!response.code||!response.device_id)throw new Error('VK не вернул код авторизации или device_id');
+   if(response.state!==state)throw new Error('Не совпало состояние OAuth. Повтори вход.');
+   const token=await window.VKID.Auth.exchangeCode(response.code,response.device_id,codeVerifier);
+   if(!token||!token.access_token)throw new Error('VK не вернул access token');
+   vkAccessToken=token.access_token;vkRefreshToken=token.refresh_token||'';vkDeviceId=token.device_id||response.device_id;
+   const profile=await window.VKID.Auth.userInfo(vkAccessToken);
+   const user=profile?.user||profile||{};
+   const displayName=[user.first_name,user.last_name].filter(Boolean).join(' ')||('ID '+(user.user_id||user.id||'VK'));
+   status.textContent='VK ID: '+displayName+' — подключён';
+   status.dataset.state='connected';
+   button.textContent='✓　VK подключён';
+   button.title='Авторизация VK ID выполнена. Доступ к VK Музыке проверим отдельно.';
+  }catch(error){
+   console.error('VK ID authorization failed:',error);
+   status.textContent='VK ID: ошибка входа — '+(error?.message||'неизвестная ошибка');
+   status.dataset.state='error';
+  }finally{button.disabled=false}
+ });
+})();
