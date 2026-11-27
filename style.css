@@ -510,3 +510,13 @@ body[data-theme="dark"] .viz-picker{background:#111d2d;border-color:#29415f;box-
 body[data-theme="dark"] .viz-option{color:#dceaff;border-color:#2b4565}
 body[data-theme="dark"] .viz-option:hover{background:#1b3452;border-color:#398cff}
 body[data-theme="dark"] .viz-option.active{background:#203f66;border-color:#398cff;color:#fff}
+
+/* v1.1.2 visual and dark-theme polish */
+#showSidebar.corner-menu,body.collapsed #showSidebar.corner-menu{border-radius:0 18px 18px 0!important}
+.record-ring-text text{font-size:36px!important}
+.viz-arrow[hidden]{display:none!important}
+body[data-theme="dark"] .search-dropdown{background:#15243a!important;border-color:#355273!important;color:#edf4ff!important;box-shadow:0 18px 44px #0009!important}
+body[data-theme="dark"] .search-dropdown .search-status{background:#15243a!important;color:#b8cbe2!important;border:0!important}
+body[data-theme="dark"] .search-dropdown .message{background:transparent!important;color:#b8cbe2!important}
+body[data-theme="dark"] .search-result{border-color:#29415f!important;color:#edf4ff!important}
+body[data-theme="dark"] .search-result:hover{background:#1d3552!important}
