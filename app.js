@@ -257,6 +257,20 @@ checkAuth();
 
 // VK Music session credentials. Secrets are sent only to the session backend and are never saved in localStorage.
 $('vkMusicSettings').onclick=()=>{$('vkMusicPanel').hidden=!$('vkMusicPanel').hidden};
+$('vkWebTokenProbe').onclick=async()=>{
+ const remixsid=$('vkCookieRemixsid').value.trim(),p=$('vkCookieP').value.trim(),button=$('vkWebTokenProbe'),output=$('vkWebTokenMessage');
+ if(!remixsid||!p){output.textContent='Нужны оба значения cookie.';return}
+ button.disabled=true;output.textContent='Запрашиваю веб-токен у VK…';output.dataset.state='';
+ try{
+  const r=await fetch('/api/vk/web-token-probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({remixsid,p}),cache:'no-store'});
+  const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'VK не выдал токен');
+  const minutes=d.expires_in_seconds==null?'—':Math.floor(d.expires_in_seconds/60)+' мин.';
+  output.textContent='Успех! VK выдал веб-токен. ID пользователя: '+(d.user_id||'не указан')+'. Срок действия: '+minutes+' Токен не сохранён.';
+  output.dataset.state='connected';$('vkCookieRemixsid').value='';$('vkCookieP').value='';
+ }catch(e){output.textContent=e.message;output.dataset.state='error'}
+ finally{button.disabled=false}
+};
+
 $('vkMusicConnect').onclick=async()=>{
  const token=$('vkMusicToken').value.trim(),user_agent=$('vkMusicUA').value.trim(),button=$('vkMusicConnect');
  if(!token||!user_agent){$('vkMusicMessage').textContent='Заполни оба поля.';return}
