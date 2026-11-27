@@ -258,7 +258,7 @@ checkAuth();
    }else if(sdkReady()){
     button.disabled=true;status.textContent='Завершаем авторизацию VK…';
     try{
-     window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state:savedState,codeVerifier:savedVerifier});
+     window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state:savedState,codeVerifier:savedVerifier,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
      window.VKIDSDK.Auth.exchangeCode(returnedCode,returnedDevice).then(token=>showConnected(token,returnedDevice)).catch(error=>{
       console.error('VK ID token exchange failed:',error);
       status.textContent='VK ID: ошибка обмена кода — '+(error?.message||'неизвестная ошибка');status.dataset.state='error';
@@ -276,7 +276,7 @@ checkAuth();
   const state=randomString(32),codeVerifier=randomString(64);
   try{
    sessionStorage.setItem(STATE_KEY,state);sessionStorage.setItem(VERIFIER_KEY,codeVerifier);
-   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier});
+   window.VKIDSDK.Config.init({app:APP_ID,redirectUrl:REDIRECT_URL,state,codeVerifier,responseMode:window.VKIDSDK.ConfigResponseMode.Callback});
    await window.VKIDSDK.Auth.login({lang:'ru'});
   }catch(error){
    sessionStorage.removeItem(STATE_KEY);sessionStorage.removeItem(VERIFIER_KEY);
