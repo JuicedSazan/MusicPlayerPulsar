@@ -110,7 +110,10 @@ class VKRemoteBrowser:
                     headless=True,
                     args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
                           "--no-zygote", "--disable-background-networking",
-                          "--disable-extensions"],
+                          "--disable-extensions", "--disable-sync", "--mute-audio",
+                          "--disable-default-apps", "--disable-translate",
+                          "--renderer-process-limit=1",
+                          "--js-flags=--max-old-space-size=128"],
                 )
                 context = browser.new_context(
                     viewport={"width": self.WIDTH, "height": self.HEIGHT},
@@ -134,7 +137,17 @@ class VKRemoteBrowser:
                 self.timings["goto_s"] = round(time.monotonic() - phase, 1)
                 phase = time.monotonic()
                 self.browser, self.context, self.page = browser, context, page
+
+                def block_heavy_navigation(route):
+                    request = route.request
+                    if (request.resource_type == "document"
+                            and request.frame == page.main_frame):
+                        route.abort()
+                    else:
+                        route.continue_()
+
                 self._wait_for_qr(page)
+                page.route("**/*", block_heavy_navigation)
                 self.timings["qr_wait_s"] = round(time.monotonic() - phase, 1)
                 self._prepare_screenshot(page)
                 self.timings["total_s"] = round(
@@ -211,6 +224,19 @@ class VKRemoteBrowser:
                                     continue
                             if clicked:
                                 page.wait_for_timeout(600)
+                            deadline = time.monotonic() + 10
+                            while time.monotonic() < deadline:
+                                try:
+                                    names = {item.get("name") for item in context.cookies(["https://vk.ru/"])}
+                                except Exception:
+                                    names = set()
+                                if "remixsid" in names:
+                                    try:
+                                        page.evaluate("() => window.stop()")
+                                    except Exception:
+                                        pass
+                                    break
+                                page.wait_for_timeout(500)
                             result_queue.put(self._capture(page))
                         elif command == "cookies":
                             result_queue.put(context.cookies([
