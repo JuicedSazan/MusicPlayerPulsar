@@ -547,6 +547,7 @@ $('vkMusicConnect').onclick=async()=>{
       connectBtn.disabled = true;
       disconnectBtn.hidden = false;
       installEl.hidden = true;
+      if (openVkBtn) openVkBtn.hidden = true;
       if (sidebarStatus) {
         sidebarStatus.textContent = 'VK Музыка: ' + name;
         sidebarStatus.dataset.state = 'connected';
@@ -563,7 +564,6 @@ $('vkMusicConnect').onclick=async()=>{
         sidebarStatus.dataset.state = '';
       }
       if (settingsBtn) settingsBtn.textContent = '♫　Настроить VK Музыку';
-      if (openVkBtn) openVkBtn.hidden = true;
     }
   }
 
