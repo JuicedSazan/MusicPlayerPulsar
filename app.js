@@ -526,6 +526,8 @@ $('vkMusicConnect').onclick=async()=>{
   const messageEl = byId('vkConnectMessage');
   const installEl = byId('vkBridgeInstall');
   const disconnectBtn = byId('vkDisconnectBtn');
+  const openVkBtn = byId('vkOpenVk');
+  const loginBtn = byId('vkLoginBtn');
   let busy = false;
 
   function setMessage(text, state) {
@@ -557,10 +559,11 @@ $('vkMusicConnect').onclick=async()=>{
       connectBtn.disabled = false;
       disconnectBtn.hidden = true;
       if (sidebarStatus) {
-        sidebarStatus.textContent = 'VK ID: не подключён';
+        sidebarStatus.textContent = 'VK Музыка: не подключена';
         sidebarStatus.dataset.state = '';
       }
       if (settingsBtn) settingsBtn.textContent = '♫　Настроить VK Музыку';
+      if (openVkBtn) openVkBtn.hidden = true;
     }
   }
 
@@ -624,14 +627,22 @@ $('vkMusicConnect').onclick=async()=>{
     try {
       if (!bridgeAvailable()) {
         installEl.hidden = false;
-        setMessage('Чтобы входить одним нажатием, один раз установите расширение ниже. Без установки используйте вход через закладку.', '');
+        const firefox = /Firefox\//.test(navigator.userAgent);
+        setMessage(firefox
+          ? 'В Firefox расширение-мост не поддерживается: используйте вход через закладку в разделе ниже.'
+          : 'Чтобы входить одним нажатием, один раз установите расширение ниже, затем обновите страницу. Без установки есть вход через закладку.', '');
+        if (firefox) {
+          const fallback = panel.querySelector('details.vk-fallback');
+          if (fallback) fallback.open = true;
+        }
         return;
       }
       setMessage('Читаю сессию VK из браузера…', 'checking');
       const cookies = await requestBridgeCookies();
       if (!cookies.remixsid && !cookies.remixsidVkCom) {
-        installEl.hidden = false;
-        setMessage('В браузере нет активной сессии VK. Откройте vk.ru, войдите в аккаунт и нажмите кнопку ещё раз.', 'error');
+        installEl.hidden = true;
+        if (openVkBtn) openVkBtn.hidden = false;
+        setMessage('В браузере нет активной сессии VK. Нажмите «Открыть vk.ru», войдите в аккаунт и вернитесь на эту страницу.', 'error');
         return;
       }
       setMessage('Подключаю VK Музыку…', 'checking');
@@ -692,6 +703,18 @@ $('vkMusicConnect').onclick=async()=>{
   });
   const recheck = byId('vkBridgeRecheck');
   if (recheck) recheck.addEventListener('click', function () { location.reload(); });
+  if (openVkBtn) openVkBtn.addEventListener('click', function () {
+    window.open('https://vk.ru/', '_blank', 'noopener');
+  });
+  if (loginBtn) {
+    // The sidebar entry starts the same connection flow as the panel button.
+    loginBtn.textContent = 'Ⓥ　Войти через VK';
+    loginBtn.onclick = function () {
+      panel.hidden = false;
+      refreshStatus();
+      connect();
+    };
+  }
   const bookmarklet = byId('vkBookmarklet');
   if (bookmarklet) bookmarklet.setAttribute('href', buildBookmarklet());
   const bookmarkletCopy = byId('vkBookmarkletCopy');
