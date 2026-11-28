@@ -610,7 +610,16 @@ def api_vk_remote_start():
         _vk_login_release(existing)
     allowed, error_text = _vk_login_prepare(sid)
     if not allowed:
-        return api_error(error_text, 409)
+        # A tab that was closed while its login window stayed open must not block
+        # the user: a retry from any session takes the window over once it looks
+        # abandoned instead of asking them to hunt for the old tab.
+        with _vk_login_guard:
+            owner_stale = time.time() - _vk_login_global["last_used"] > 30
+        if owner_stale:
+            _vk_login_release()
+            allowed, error_text = _vk_login_prepare(sid)
+        if not allowed:
+            return api_error(error_text, 409)
     try:
         from vk_remote_browser import QRLoginBrowser
         browser = QRLoginBrowser()
