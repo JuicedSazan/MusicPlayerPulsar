@@ -643,6 +643,53 @@ def api_vk_remote_start():
                     "timings": getattr(browser, "timings", {}), "page": info})
 
 
+@app.post("/api/vk/remote/check")
+def api_vk_remote_check():
+    """Reload the VK page once and connect if the scan already created a session."""
+    s = state()
+    with s["lock"]:
+        browser = s.get("vk_remote_browser")
+    if not browser:
+        return api_error("Окно входа VK не открыто. Нажмите «Снова».", 409)
+    _vk_login_touch(browser)
+    try:
+        import base64
+        result = browser.check_scan()
+        image = base64.b64encode(base64.b64decode(result.get("image") or "")).decode("ascii")
+    except Exception as exc:
+        return jsonify({"ok": False, "error": "Не удалось проверить вход: "
+                        + (getattr(browser, "last_error", "") or str(exc))[:220]}), 502
+    if not result.get("session"):
+        return jsonify({"ok": True, "connected": False, "image": image,
+                        "message": "VK пока не подтвердил вход: введите код с экрана телефона."})
+    try:
+        cookies = browser.cookies()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": "Сессия VK не читается: " + str(exc)[:180]}), 502
+    remixsid, cookie_p, domain = _vk_session_from_cookies(cookies)
+    if not remixsid:
+        return jsonify({"ok": True, "connected": False, "image": image,
+                        "message": "VK пока не подтвердил вход: введите код с экрана телефона."})
+    if VKMusicService is None:
+        return api_error("VKpyMusic не установлена на сервере.", 503)
+    try:
+        connection = _vk_cookie_connection(remixsid, cookie_p, browser.user_agent(), domain)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": "Вход принят, но VK Музыка не подключилась: "
+                        + str(exc)[:220]}), 502
+    _vk_store_connection(
+        s, connection["service"], connection["user_id"], connection["user_name"],
+        remixsid=remixsid, cookie_p=cookie_p, user_agent=browser.user_agent(),
+        cookie_domain=domain, expires=connection["expires"],
+    )
+    with s["lock"]:
+        s["vk_remote_browser"] = None
+    _vk_login_release(browser)
+    snapshot = _vk_session_snapshot(s)
+    snapshot.update(ok=True, connected=True, message="VK Музыка подключена.", image=image)
+    return jsonify(snapshot)
+
+
 @app.post("/api/vk/remote/reload")
 def api_vk_remote_reload():
     """Capture the VK window now (no page reload: the worker must stay responsive)."""
@@ -771,6 +818,11 @@ def api_vk_remote_code():
             trace = browser.get_trace()
         except Exception:
             trace = {}
+        try:
+            browser.code_submitted = True
+            browser.code_stage = "rejected"
+        except Exception:
+            pass
         return jsonify({"ok": False, "error": _vk_code_failure(browser), "image": image,
                         "trace": trace}), 401
     if VKMusicService is None:
@@ -816,7 +868,7 @@ def api_vk_remote_snapshot():
     return jsonify({"ok": True, "image": image,
                     "page": getattr(browser, "code_page_text", "")[:400],
                     "fields": getattr(browser, "code_visible_fields", []),
-                    "stage": getattr(browser, "code_stage", ""),
+                    "stage": "snapshot",
                     "trace": trace})
 
 

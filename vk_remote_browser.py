@@ -548,6 +548,30 @@ class QRLoginBrowser:
         self._wait_for_qr(page, timeout_seconds=25)
         return self._capture(page)
 
+    def check_scan(self):
+        """Reload the login page once and report whether VK now has a session."""
+        page = getattr(self, "_page", None)
+        if page is None:
+            self._call("screenshot")
+            return {"image": self.screenshot_data or "", "logged_in": False, "session": False}
+        self._trace("scan-check", page)
+        try:
+            page.reload(wait_until="commit", timeout=30000)
+        except Exception:
+            try:
+                page.goto("https://vk.ru/", wait_until="commit", timeout=30000)
+            except Exception:
+                pass
+        self._wait_for_qr(page, timeout_seconds=20)
+        session = False
+        try:
+            names = {item.get("name") for item in page.context.cookies(["https://vk.ru/"])}
+            session = "remixsid" in names
+        except Exception:
+            session = False
+        self._trace("scan-checked", page)
+        return {"image": self._capture(page), "logged_in": session, "session": session}
+
     # --------------------------------------------------------------- commands
     def _release_slot(self):
         if not self._slot_released:

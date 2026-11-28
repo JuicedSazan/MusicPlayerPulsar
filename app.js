@@ -297,7 +297,7 @@ $('vkInspectAudio').onclick=async()=>{
 
 
 /* Вход в VK по QR-коду через серверный Chromium: без расширений и паролей. */
-let vkQrStarted = false, vkQrPollTimer = null, vkQrBusy = false;
+let vkQrStarted = false, vkQrPollTimer = null, vkQrBusy = false, vkQrCodeSent = false;
 const vkQrModal = document.getElementById('vkRemoteModal');
 const vkQrScreen = document.getElementById('vkRemoteScreen');
 const vkQrLoading = document.getElementById('vkRemoteLoading');
@@ -342,8 +342,8 @@ async function vkQrPoll() {
   setTimeout(vkQrCloseModal, 1400);
  } catch (error) {
   const text = String((error && error.message) || '');
-  if (/ещё не подтверждён|QR/i.test(text)) {
-   vkQrMessage.textContent = 'Ожидаю подтверждение входа на телефоне…';
+  if (/ещё не подтверждён/i.test(text) && !vkQrCodeSent) {
+   vkQrMessage.textContent = 'Отсканируйте QR в приложении, затем введите код с экрана телефона.';
    vkQrMessage.dataset.state = '';
   } else {
    vkQrMessage.textContent = text;
@@ -357,6 +357,7 @@ async function vkQrPoll() {
 }
 
 async function vkQrStart() {
+ vkQrCodeSent = false;
  if (vkQrStarted) { vkQrModal.hidden = false; return; }
  const button = document.getElementById('vkConnectBtn');
  if (button) button.disabled = true;
@@ -414,14 +415,22 @@ if (vkQrRetryBtn) vkQrRetryBtn.addEventListener('click', async function () {
 async function vkQrScreenRefresh() {
  if (vkQrBusy) return;
  vkQrBusy = true;
- vkQrMessage.textContent = 'Перезагружаю страницу VK — так она узнаёт о сканировании…';
+ vkQrMessage.textContent = 'Проверяю, подтвердил ли VK вход…';
  vkQrMessage.dataset.state = '';
  try {
-  const data = await vkQrRequest('/api/vk/remote/reload', {});
+  const data = await vkQrRequest('/api/vk/remote/check', {});
   if (data.image) vkQrScreen.src = 'data:image/jpeg;base64,' + data.image;
-  const last = data.trace && data.trace.trace && data.trace.trace[data.trace.trace.length - 1];
-  vkQrMessage.textContent = last && last.page ? ('Экран VK: ' + last.page.slice(0, 200)) : 'Экран обновлён.';
-  vkQrMessage.dataset.state = 'connected';
+  if (data.connected) {
+   vkQrMessage.textContent = 'VK Музыка подключена. Загружаю музыку…';
+   vkQrMessage.dataset.state = 'connected';
+   vkQrStopPolling();
+   vkQrStarted = false;
+   if (typeof window.__pulsarVkConnected === 'function') window.__pulsarVkConnected(data);
+   setTimeout(vkQrCloseModal, 1400);
+   return;
+  }
+  vkQrMessage.textContent = data.message || 'VK пока не подтвердил вход.';
+  vkQrMessage.dataset.state = '';
  } catch (error) {
   vkQrMessage.textContent = String((error && error.message) || '');
   vkQrMessage.dataset.state = 'error';
@@ -438,6 +447,7 @@ async function vkQrSendCode() {
  }
  vkQrMessage.textContent = 'Отправляю код и подключаю VK…';
  vkQrMessage.dataset.state = '';
+ vkQrCodeSent = true;
  try {
   const response = await fetch('/api/vk/remote/code', {
    method: 'POST', credentials: 'same-origin', cache: 'no-store',
