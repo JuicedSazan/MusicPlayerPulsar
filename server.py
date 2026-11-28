@@ -700,6 +700,21 @@ def _vk_session_from_cookies(cookies):
     return remixsid, cookie_p, domain
 
 
+def _vk_code_failure(browser, exc=None):
+    """Human-readable reason for a failed code submission."""
+    detail = getattr(browser, "last_error", "") or ""
+    if not detail and exc is not None:
+        detail = type(exc).__name__ + ": " + str(exc).replace("\n", " ")
+    fields = getattr(browser, "code_visible_fields", None) or []
+    if fields and "no-field" in detail:
+        kinds = sorted({str(item.get("type")) for item in fields})
+        return ("VK не показал поле для кода — на экране только поля: " + ", ".join(kinds)
+                + ". Нажмите «Снять экран VK» и пришлите картинку.")
+    if detail:
+        return detail[:400]
+    return "Окно входа VK не ответило вовремя. Нажмите «Снова» или откройте QR заново."
+
+
 @app.post("/api/vk/remote/code")
 def api_vk_remote_code():
     """Type the new-device confirmation code and connect VK Music right away."""
@@ -707,7 +722,7 @@ def api_vk_remote_code():
     with s["lock"]:
         browser = s.get("vk_remote_browser")
     if not browser:
-        return api_error("Окно входа VK не запущено.", 404)
+        return api_error("Окно входа VK больше не открыто. Нажмите «Снова» и отсканируйте новый QR.", 409)
     _vk_login_touch(browser)
     payload = request.get_json(silent=True) or {}
     digits = re.sub(r"\D", "", str(payload.get("code") or ""))[:10]
@@ -716,17 +731,18 @@ def api_vk_remote_code():
     try:
         import base64
         image = base64.b64encode(browser.enter_code(digits)).decode("ascii")
+    except Exception as exc:
+        message = _vk_code_failure(browser, exc)
+        return jsonify({"ok": False, "error": message, "pending": True}), 502
+    try:
         cookies = browser.cookies()
     except Exception as exc:
-        detail = getattr(browser, "last_error", "") or str(exc).replace("\n", " ")
-        return api_error("Не удалось отправить код в окно VK: " + str(detail)[:340], 502)
+        return jsonify({"ok": False, "error": "Не удалось прочитать сессию VK: "
+                        + (getattr(browser, "last_error", "") or str(exc))[:240],
+                        "image": image}), 502
     remixsid, cookie_p, domain = _vk_session_from_cookies(cookies)
-    page_text = getattr(browser, "code_page_text", "") or ""
     if not remixsid:
-        message = "VK не принял код."
-        if page_text:
-            message += " Экран VK: " + page_text[:200]
-        return jsonify({"ok": False, "error": message, "image": image, "pending": True}), 401
+        return jsonify({"ok": False, "error": _vk_code_failure(browser), "image": image}), 401
     if VKMusicService is None:
         return api_error("VKpyMusic не установлена на сервере.", 503)
     try:
@@ -745,6 +761,27 @@ def api_vk_remote_code():
     snapshot = _vk_session_snapshot(s)
     snapshot.update(ok=True, connected=True, message="VK Музыка подключена.", image=image)
     return jsonify(snapshot)
+
+
+@app.post("/api/vk/remote/snapshot")
+def api_vk_remote_snapshot():
+    """Fresh picture of the server-side VK window, for diagnosing the login."""
+    s = state()
+    with s["lock"]:
+        browser = s.get("vk_remote_browser")
+    if not browser:
+        return api_error("Окно входа VK не открыто.", 404)
+    _vk_login_touch(browser)
+    try:
+        import base64
+        image = base64.b64encode(browser.screenshot()).decode("ascii")
+    except Exception as exc:
+        return jsonify({"ok": False, "error": "Не удалось снять экран: "
+                        + (getattr(browser, "last_error", "") or str(exc))[:200]}), 502
+    return jsonify({"ok": True, "image": image,
+                    "page": getattr(browser, "code_page_text", "")[:400],
+                    "fields": getattr(browser, "code_visible_fields", []),
+                    "stage": getattr(browser, "code_stage", "")})
 
 
 @app.post("/api/vk/remote/input")

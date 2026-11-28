@@ -102,7 +102,13 @@ class FakeLoginWindow:
     last_error = ""
     code_page_text = ""
 
+    code_visible_fields = [{"type": "search", "name": None, "visible": True}]
+    code_stage = "find-field"
+
     def enter_code(self, code):
+        return b"fake-jpeg"
+
+    def screenshot(self):
         return b"fake-jpeg"
 
     def cookies(self):
@@ -145,6 +151,35 @@ code_response = client.post("/api/vk/remote/code", json={"code": "123456"})
 code_payload = code_response.get_json() or {}
 check("numeric code connects VK", code_response.status_code == 200 and code_payload.get("connected") is True,
       f"{code_response.status_code} {code_payload.get('error', '')}")
+
+# 1c. A code the site rejects is explained, not silently swallowed.
+client.get("/api/vk/session/status")
+session_state = next(iter(server._sessions.values()))
+bad_window = FakeLoginWindow()
+
+
+class RejectingWindow(FakeLoginWindow):
+    def cookies(self):
+        return [{"name": "remixlns", "value": "x", "domain": ".vk.ru"}]
+
+    def enter_code(self, code):
+        self.last_error = "code@no-field: не нашёл поле кода"
+        return b"fake-jpeg"
+
+
+bad_window = RejectingWindow()
+session_state["vk_remote_browser"] = bad_window
+bad = client.post("/api/vk/remote/code", json={"code": "123456"})
+bad_payload = bad.get_json() or {}
+check("rejected code is explained",
+      bad.status_code == 401 and "поле" in (bad_payload.get("error") or ""),
+      f"{bad.status_code} {(bad_payload.get('error') or '')[:80]}")
+
+# 1d. The operator can take a screenshot of the server-side window.
+shot = client.post("/api/vk/remote/snapshot", json={})
+check("VK screen snapshot works", shot.status_code == 200 and bool((shot.get_json() or {}).get("image")),
+      f"{shot.status_code}")
+session_state["vk_remote_browser"] = None
 
 # 2. Session status reflects the connected account.
 status = client.get("/api/vk/session/status").get_json()

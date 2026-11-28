@@ -464,6 +464,25 @@ async function vkQrSendCode() {
 
 const vkQrScreenBtn = document.getElementById('vkRemoteScreenRefresh');
 if (vkQrScreenBtn) vkQrScreenBtn.addEventListener('click', vkQrScreenRefresh);
+const vkQrShotBtn = document.getElementById('vkRemoteShot');
+if (vkQrShotBtn) vkQrShotBtn.addEventListener('click', async function () {
+ vkQrMessage.textContent = 'Снимаю экран окна VK…';
+ vkQrMessage.dataset.state = '';
+ try {
+  const response = await fetch('/api/vk/remote/snapshot', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const data = await response.json().catch(function () { return null; });
+  if (!data || !data.ok) throw new Error((data && data.error) || ('HTTP ' + response.status));
+  vkQrScreen.src = 'data:image/jpeg;base64,' + data.image;
+  const parts = [];
+  if (data.stage) parts.push('стадия: ' + data.stage);
+  if (data.page) parts.push('экран: ' + data.page.slice(0, 160));
+  vkQrMessage.textContent = parts.join(' · ') || 'Экран снят.';
+  vkQrMessage.dataset.state = 'connected';
+ } catch (error) {
+  vkQrMessage.textContent = 'Не удалось снять экран: ' + ((error && error.message) || '');
+  vkQrMessage.dataset.state = 'error';
+ }
+});
 const vkQrCodeBtn = document.getElementById('vkRemoteCodeSend');
 if (vkQrCodeBtn) vkQrCodeBtn.addEventListener('click', vkQrSendCode);
 const vkQrCodeInput = document.getElementById('vkRemoteCode');

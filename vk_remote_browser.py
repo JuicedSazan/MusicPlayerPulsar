@@ -113,6 +113,7 @@ class QRLoginBrowser:
         self.code_page_text = ""
         self.code_visible_fields = []
         self.code_stage = ""
+        self.code_stage = ""
         self.page_info = {}
         self.thread = threading.Thread(target=self._run, name="pulsar-vk-qr", daemon=True)
         self.thread.start()
@@ -352,7 +353,7 @@ class QRLoginBrowser:
                 continue
         return usable
 
-    def _find_code_field(self, page, timeout_seconds=20):
+    def _find_code_field(self, page, timeout_seconds=30):
         """Wait for a real code input; return (frame, [inputs], visible-field report)."""
         deadline = time.monotonic() + timeout_seconds
         report = []
