@@ -348,7 +348,7 @@ async function vkQrPoll() {
   } else {
    vkQrMessage.textContent = text;
    vkQrMessage.dataset.state = 'error';
-   if (/не запущено|закрыто/i.test(text)) {
+   if (/не запущено|закрыто|не принял код/i.test(text)) {
     vkQrStopPolling();
     vkQrStarted = false;
    }
@@ -452,6 +452,10 @@ async function vkQrSendCode() {
   }
   vkQrMessage.textContent = (data && data.error) || ('Ошибка ' + response.status);
   vkQrMessage.dataset.state = 'error';
+  if (/не принял код|не запущено|закрыто/i.test(vkQrMessage.textContent)) {
+   vkQrStopPolling();
+   vkQrStarted = false;
+  }
  } catch (error) {
   vkQrMessage.textContent = 'Не удалось отправить код: ' + ((error && error.message) || '');
   vkQrMessage.dataset.state = 'error';
