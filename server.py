@@ -742,7 +742,13 @@ def api_vk_remote_code():
                         "image": image}), 502
     remixsid, cookie_p, domain = _vk_session_from_cookies(cookies)
     if not remixsid:
-        return jsonify({"ok": False, "error": _vk_code_failure(browser), "image": image}), 401
+        trace = {}
+        try:
+            trace = browser.get_trace()
+        except Exception:
+            trace = {}
+        return jsonify({"ok": False, "error": _vk_code_failure(browser), "image": image,
+                        "trace": trace}), 401
     if VKMusicService is None:
         return api_error("VKpyMusic не установлена на сервере.", 503)
     try:
@@ -778,10 +784,16 @@ def api_vk_remote_snapshot():
     except Exception as exc:
         return jsonify({"ok": False, "error": "Не удалось снять экран: "
                         + (getattr(browser, "last_error", "") or str(exc))[:200]}), 502
+    trace = {}
+    try:
+        trace = browser.get_trace()
+    except Exception:
+        trace = {}
     return jsonify({"ok": True, "image": image,
                     "page": getattr(browser, "code_page_text", "")[:400],
                     "fields": getattr(browser, "code_visible_fields", []),
-                    "stage": getattr(browser, "code_stage", "")})
+                    "stage": getattr(browser, "code_stage", ""),
+                    "trace": trace})
 
 
 @app.post("/api/vk/remote/input")

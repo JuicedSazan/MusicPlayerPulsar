@@ -452,9 +452,12 @@ async function vkQrSendCode() {
   }
   vkQrMessage.textContent = (data && data.error) || ('Ошибка ' + response.status);
   vkQrMessage.dataset.state = 'error';
-  if (/не принял код|не запущено|закрыто/i.test(vkQrMessage.textContent)) {
+  if (/не принял код|не запущено|закрыто|не показал поле/i.test(vkQrMessage.textContent)) {
    vkQrStopPolling();
    vkQrStarted = false;
+  }
+  if (window.console && data && data.trace) {
+   console.info('[Pulsar VK trace]', data.trace);
   }
  } catch (error) {
   vkQrMessage.textContent = 'Не удалось отправить код: ' + ((error && error.message) || '');

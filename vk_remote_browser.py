@@ -112,6 +112,7 @@ class QRLoginBrowser:
         self.code_stage = ""
         self.code_page_text = ""
         self.code_visible_fields = []
+        self.trace = []
         self.code_stage = ""
         self.code_stage = ""
         self.page_info = {}
@@ -158,6 +159,7 @@ class QRLoginBrowser:
                         )
                     self.screenshot_data = self._capture(page)
                     self.page_info = self._page_info(page)
+                    self._trace("qr-shown", page)
                     self.timings["total_s"] = round(time.monotonic() - started, 1)
                     browser.close()
                     browser = None
@@ -395,7 +397,9 @@ class QRLoginBrowser:
         text = re.sub(r"\D", "", str(code or ""))[:10]
         if not text:
             raise RuntimeError("пустой код")
+        self._trace("code-requested", page)
         frame, fields, report = self._find_code_field(page)
+        self._trace("code-field-search", page)
         self.code_visible_fields = report[:12]
         if frame is None or not fields:
             self.code_page_text = self._page_text(page) + " || " + self._frame_text(page)
@@ -436,6 +440,7 @@ class QRLoginBrowser:
                 page.keyboard.press("Enter")
             except Exception:
                 pass
+        self._trace("code-submitted", page)
         self.code_stage = "wait-cookie"
         deadline = time.monotonic() + 10
         got_session = False
@@ -483,6 +488,35 @@ class QRLoginBrowser:
             except Exception:
                 continue
         return " | ".join(chunks)[:400]
+
+    def _trace(self, stage, page=None):
+        """Record what the window shows at a stage (bounded, never secrets)."""
+        entry = {"t": round(time.time(), 1), "stage": stage}
+        if page is not None:
+            try:
+                entry["page"] = self._page_text(page)[:160]
+                entry["frame"] = self._frame_text(page)[:160]
+                inputs = []
+                for frame in page.frames:
+                    try:
+                        for item in frame.query_selector_all("input"):
+                            inputs.append({
+                                "type": item.get_attribute("type"),
+                                "mode": item.get_attribute("inputmode"),
+                                "max": item.get_attribute("maxlength"),
+                                "visible": bool(item.is_visible()),
+                            })
+                    except Exception:
+                        continue
+                entry["inputs"] = inputs[:8]
+            except Exception:
+                entry["error"] = "trace failed"
+        self.trace.append(entry)
+        del self.trace[:-20]
+        return entry
+
+    def get_trace(self):
+        return {"trace": list(self.trace), "stage": self.code_stage}
 
     # --------------------------------------------------------------- commands
     def _release_slot(self):
