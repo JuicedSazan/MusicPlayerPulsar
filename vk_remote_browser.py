@@ -28,6 +28,18 @@ USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
+def _route_login_request(route):
+    """Login window requests: no cache, no ads/trackers, no heavy media."""
+    request = route.request
+    if _should_abort(request):
+        route.abort()
+        return
+    headers = dict(request.headers)
+    headers["Cache-Control"] = "no-cache, no-store, max-age=0"
+    headers["Pragma"] = "no-cache"
+    route.continue_(headers=headers)
+
+
 LOGIN_URLS = ("https://vk.ru/", "https://vk.com/")
 ABORT_TYPES = ("font", "media")
 ABORT_HOST_PARTS = (
@@ -113,6 +125,7 @@ class QRLoginBrowser:
         self.code_page_text = ""
         self.code_visible_fields = []
         self.trace = []
+        self._page = None
         self.code_stage = ""
         self.code_stage = ""
         self.page_info = {}
@@ -140,7 +153,7 @@ class QRLoginBrowser:
                         user_agent=USER_AGENT,
                         device_scale_factor=1,
                     )
-                    context.route("**/*", lambda route: route.abort() if _should_abort(route.request) else route.continue_())
+                    context.route("**/*", _route_login_request)
                     page = context.new_page()
                     page.set_default_timeout(30000)
                     reached = False
@@ -193,13 +206,14 @@ class QRLoginBrowser:
                 user_agent=USER_AGENT,
                 device_scale_factor=1,
             )
-            context.route("**/*", lambda route: route.abort() if _should_abort(route.request) else route.continue_())
+            context.route("**/*", _route_login_request)
             page = context.new_page()
             page.set_default_timeout(30000)
             # Follow the live page that session 1 already loaded: opening another
             # login in a different context can be refused by VK as a new device.
             page.goto("https://vk.ru/", wait_until="commit", timeout=45000)
             self._wait_for_qr(page, timeout_seconds=45)
+            self._page = page
             self.serve_ready.set()
             while True:
                 command, args, result_queue = self.commands.get()
@@ -398,7 +412,18 @@ class QRLoginBrowser:
         if not text:
             raise RuntimeError("пустой код")
         self._trace("code-requested", page)
-        frame, fields, report = self._find_code_field(page)
+        frame, fields, report = self._find_code_field(page, timeout_seconds=12)
+        if not fields:
+            self._trace("qr-refresh-before-code", page)
+            try:
+                page.reload(wait_until="commit", timeout=45000)
+            except Exception:
+                try:
+                    page.goto("https://vk.ru/", wait_until="commit", timeout=45000)
+                except Exception:
+                    pass
+            self._wait_for_qr(page, timeout_seconds=25)
+            frame, fields, report = self._find_code_field(page, timeout_seconds=12)
         self._trace("code-field-search", page)
         self.code_visible_fields = report[:12]
         if frame is None or not fields:
@@ -517,6 +542,22 @@ class QRLoginBrowser:
 
     def get_trace(self):
         return {"trace": list(self.trace), "stage": self.code_stage}
+
+    def reload_screen(self):
+        """Reload the login page and return a fresh screenshot (UI button)."""
+        page = getattr(self, "_page", None)
+        if page is None:
+            self._call("screenshot")
+            return base64.b64decode(self.screenshot_data or "")
+        try:
+            page.reload(wait_until="commit", timeout=45000)
+        except Exception:
+            try:
+                page.goto("https://vk.ru/", wait_until="commit", timeout=45000)
+            except Exception:
+                pass
+        self._wait_for_qr(page, timeout_seconds=25)
+        return self._capture(page)
 
     # --------------------------------------------------------------- commands
     def _release_slot(self):

@@ -412,11 +412,16 @@ if (vkQrRetryBtn) vkQrRetryBtn.addEventListener('click', async function () {
 });
 
 async function vkQrScreenRefresh() {
- if (!vkQrStarted || vkQrBusy) return;
+ if (vkQrBusy) return;
  vkQrBusy = true;
+ vkQrMessage.textContent = 'Перезагружаю страницу VK — так она узнаёт о сканировании…';
+ vkQrMessage.dataset.state = '';
  try {
-  const data = await vkQrRequest('/api/vk/remote/screen', {});
-  vkQrScreen.src = 'data:image/jpeg;base64,' + data.image;
+  const data = await vkQrRequest('/api/vk/remote/reload', {});
+  if (data.image) vkQrScreen.src = 'data:image/jpeg;base64,' + data.image;
+  const last = data.trace && data.trace.trace && data.trace.trace[data.trace.trace.length - 1];
+  vkQrMessage.textContent = last && last.page ? ('Экран VK: ' + last.page.slice(0, 200)) : 'Экран обновлён.';
+  vkQrMessage.dataset.state = 'connected';
  } catch (error) {
   vkQrMessage.textContent = String((error && error.message) || '');
   vkQrMessage.dataset.state = 'error';

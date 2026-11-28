@@ -643,6 +643,30 @@ def api_vk_remote_start():
                     "timings": getattr(browser, "timings", {}), "page": info})
 
 
+@app.post("/api/vk/remote/reload")
+def api_vk_remote_reload():
+    """Reload the server-side VK page and capture what it shows now."""
+    s = state()
+    with s["lock"]:
+        browser = s.get("vk_remote_browser")
+    if not browser:
+        return api_error("Окно входа VK не открыто.", 404)
+    _vk_login_touch(browser)
+    try:
+        import base64
+        image = base64.b64encode(browser.refresh()).decode("ascii")
+    except Exception as exc:
+        return jsonify({"ok": False, "error": "Не удалось перезагрузить экран VK: "
+                        + (getattr(browser, "last_error", "") or str(exc))[:220]}), 502
+    trace = {}
+    try:
+        trace = browser.get_trace()
+    except Exception:
+        trace = {}
+    return jsonify({"ok": True, "image": image, "trace": trace,
+                    "page": getattr(browser, "code_page_text", "")[:300]})
+
+
 @app.post("/api/vk/remote/refresh")
 def api_vk_remote_refresh():
     """Reload the QR login page and return a fresh screenshot."""
