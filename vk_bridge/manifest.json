@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Pulsar VK Bridge",
+  "version": "1.0.0",
+  "description": "Передаёт странице плеера cookies сессии VK Music для подключения VK Music.",
+  "permissions": ["cookies"],
+  "host_permissions": [
+    "*://vk.ru/*",
+    "*://*.vk.ru/*",
+    "*://vk.com/*",
+    "*://*.vk.com/*",
+    "*://pulse-vinyl-web-v11-test.onrender.com/*",
+    "*://pulse-vinyl-web.onrender.com/*",
+    "http://localhost/*",
+    "https://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://pulse-vinyl-web-v11-test.onrender.com/*",
+        "*://pulse-vinyl-web.onrender.com/*",
+        "http://localhost/*",
+        "https://localhost/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}

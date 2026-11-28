@@ -564,3 +564,29 @@ body[data-theme="dark"] .search-dropdown .search-result:hover{background:#1b3452
 #vkRemoteMessage{font-size:11px;line-height:1.5;color:#777;margin-top:9px}
 #vkRemoteMessage[data-state=error]{color:#b33b2f}
 @media(max-width:650px){.vk-remote-dialog{padding:10px}.vk-remote-screen-wrap{aspect-ratio:4/3}.vk-remote-controls button{flex:1 1 30%}}
+
+/* VK Music session card: easy login */
+.vk-session-card{display:flex;flex-direction:column;gap:8px}
+.vk-session-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.vk-session-title{font-size:10px;letter-spacing:1.4px;font-weight:850;color:#55584f}
+.vk-session-status{font-size:9px;letter-spacing:.6px;color:#9a9c94;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vk-session-status[data-state="connected"]{color:#567000;font-weight:750}
+.vk-connect-btn{margin-top:2px;border:0;border-radius:8px;padding:12px 10px;background:var(--accent);font-size:10px;font-weight:900;letter-spacing:.6px;width:100%}
+.vk-connect-btn:disabled{opacity:.65;cursor:default}
+.vk-connect-message{font-size:10px;line-height:1.5;color:#777b6e;min-height:0}
+.vk-connect-message[data-state="connected"]{color:#567000}
+.vk-connect-message[data-state="error"]{color:#b33b2f}
+.vk-secondary-btn{border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:#fff;font-size:9px;font-weight:800;width:100%}
+.vk-secondary-btn:hover{background:#f2f4ea}
+.vk-link-btn{display:block;text-align:center;border:0;border-radius:8px;padding:11px 10px;background:#24251f;color:#f4ffcf;font-size:9px;font-weight:850;letter-spacing:.5px;text-decoration:none}
+.vk-bridge-install{border-top:1px dashed var(--line);padding-top:9px}
+.vk-bridge-steps{margin:8px 0;padding-left:16px;font-size:10px;line-height:1.6;color:#6f7269}
+.vk-bridge-steps code{font-size:9px;background:#eceee4;border-radius:4px;padding:1px 4px}
+.vk-hint{font-size:9px;color:#9a9c94;margin:6px 0 0}
+.vk-fallback{border-top:1px solid var(--line);padding-top:7px}
+.vk-fallback summary{font-size:10px;font-weight:750;color:#66695f;cursor:pointer;list-style:none}
+.vk-fallback summary::-webkit-details-marker{display:none}
+.vk-fallback summary:before{content:"▸ ";color:#9a9c94}
+.vk-fallback[open] summary:before{content:"▾ "}
+.vk-fallback p{font-size:10px;line-height:1.5;color:#777b6e;margin:7px 0 0}
+.vk-bookmarklet{display:inline-block;background:#24251f;color:#f4ffcf;border-radius:4px;padding:2px 6px;font-size:9px;text-decoration:none;cursor:grab}

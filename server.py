@@ -46,7 +46,8 @@ def _new_session():
     return {
         "client": None, "auth": "idle", "auth_url": "", "auth_code": "",
         "auth_error": "", "auth_generation": 0, "vk_service": None, "vk_user_id": None,
-        "vk_remixsid": None, "vk_cookie_p": None, "vk_user_agent": None,
+        "vk_user_name": "", "vk_remixsid": None, "vk_cookie_p": None,
+        "vk_user_agent": None, "vk_cookie_domain": "",
         "vk_token_expires": 0, "vk_refresh_lock": threading.Lock(),
         "vk_auth_error": "", "vk_remote_browser": None,
         "jobs": {}, "last_seen": time.time(),
@@ -282,17 +283,22 @@ def _get_client(s):
         return s["client"]
 
 
-def _request_vk_web_token(remixsid, cookie_p, user_agent):
-    """Exchange in-memory VK session cookies for a short-lived web token."""
+def _request_vk_web_token(remixsid, cookie_p, user_agent, domain="vk.ru"):
+    """Exchange in-memory VK session cookies for a short-lived web token.
+
+    Newer VK accounts live on vk.ru; older sessions only carry vk.com cookies,
+    so the exchange endpoint and its Origin follow the cookie domain.
+    """
     import urllib.parse
+    site = "vk.com" if domain == "vk.com" else "vk.ru"
     form = urllib.parse.urlencode({"version": "1", "app_id": "6287487"}).encode()
     cookie_header = f"remixsid={remixsid}" + (f"; p={cookie_p}" if cookie_p else "")
     req = urllib.request.Request(
-        "https://login.vk.ru/?act=web_token", data=form,
+        f"https://login.{site}/?act=web_token", data=form,
         headers={
             "User-Agent": user_agent or "Mozilla/5.0",
             "Content-Type": "application/x-www-form-urlencoded",
-            "Origin": "https://vk.ru", "Referer": "https://vk.ru/",
+            "Origin": f"https://{site}", "Referer": f"https://{site}/",
             "Cookie": cookie_header,
         }, method="POST",
     )
@@ -316,6 +322,7 @@ def _ensure_vk_service(s):
         cookie_p = s.get("vk_cookie_p") or ""
         user_agent = s.get("vk_user_agent") or "Mozilla/5.0"
         user_id = s.get("vk_user_id")
+        cookie_domain = s.get("vk_cookie_domain") or "vk.ru"
     if not service:
         return None, "VK Music не подключена в этой сессии."
     if not remixsid:
@@ -330,7 +337,7 @@ def _ensure_vk_service(s):
             return current, ""
         return None, "Обновляю подключение VK. Повтори запрос через несколько секунд."
     try:
-        token_data = _request_vk_web_token(remixsid, cookie_p, user_agent)
+        token_data = _request_vk_web_token(remixsid, cookie_p, user_agent, cookie_domain)
         token = str(token_data.get("access_token") or "")
         new_user_id = token_data.get("user_id") or user_id
         new_expires = int(token_data.get("expires") or 0)
@@ -355,6 +362,172 @@ def _ensure_vk_service(s):
         return None, "Не удалось обновить сессию VK. Возможно, потребуется войти заново."
     finally:
         s["vk_refresh_lock"].release()
+
+
+def _vk_clean_cookie_value(raw):
+    """Accept only a bare cookie value; reject headers, separators and junk."""
+    value = str(raw or "").strip()
+    if not value or len(value) > 10000:
+        return ""
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value) or ";" in value or " " in value:
+        return ""
+    return value
+
+
+def _vk_read_profile(service, fallback_user_id=None):
+    """Return (user_id, display name) for a VKpyMusic service, best effort."""
+    user_id = fallback_user_id
+    name = ""
+    try:
+        info = service.get_user_info()
+        info_id = getattr(info, "userid", None)
+        if info_id:
+            user_id = info_id
+        name = " ".join(filter(None, [
+            str(getattr(info, "first_name", "") or "").strip(),
+            str(getattr(info, "last_name", "") or "").strip(),
+        ])).strip()
+    except Exception:
+        pass
+    try:
+        user_id = int(user_id) if user_id else None
+    except (TypeError, ValueError):
+        user_id = None
+    return user_id, name or ("ID " + str(user_id) if user_id else "VK")
+
+
+def _vk_store_connection(s, service, user_id, name, remixsid=None, cookie_p=None,
+                         user_agent=None, cookie_domain="", expires=0):
+    """Keep the connected VK client and its refresh material in server memory only."""
+    with s["lock"]:
+        s["vk_service"] = service
+        s["vk_user_id"] = user_id
+        s["vk_user_name"] = name
+        s["vk_remixsid"] = remixsid
+        s["vk_cookie_p"] = cookie_p
+        s["vk_user_agent"] = user_agent
+        s["vk_cookie_domain"] = cookie_domain if remixsid else ""
+        s["vk_token_expires"] = int(expires or 0)
+        s["vk_auth_error"] = ""
+
+
+def _vk_make_service(user_agent, token):
+    service = VKMusicService(user_agent, token)
+    songs = service.search_songs_by_text("Daft Punk", count=1, offset=0)
+    if not songs:
+        raise RuntimeError("VK ответил без результатов поиска музыки.")
+    return service
+
+
+def _vk_session_snapshot(s):
+    with s["lock"]:
+        connected = s.get("vk_service") is not None
+        expires = int(s.get("vk_token_expires") or 0)
+        return {
+            "connected": connected,
+            "user_id": s.get("vk_user_id"),
+            "user_name": s.get("vk_user_name") or "",
+            "expires_in_seconds": max(0, expires - int(time.time())) if expires else None,
+            "refreshable": bool(s.get("vk_remixsid")),
+            "auth_error": s.get("vk_auth_error") or "",
+        }
+
+
+def _vk_cookie_connection(remixsid, cookie_p, user_agent, domain):
+    """Mint a web token from browser session cookies and verify VK Music."""
+    if VKMusicService is None:
+        raise RuntimeError("VKpyMusic не установлена на сервере.")
+    token_data = _request_vk_web_token(remixsid, cookie_p, user_agent, domain)
+    token = str(token_data.get("access_token") or "")
+    if not token:
+        raise RuntimeError("VK не вернул access_token.")
+    service = _vk_make_service(user_agent, token)
+    user_id, name = _vk_read_profile(service, token_data.get("user_id"))
+    return {
+        "service": service,
+        "user_id": user_id,
+        "user_name": name,
+        "expires": int(token_data.get("expires") or 0),
+    }
+
+
+@app.post("/api/vk/session/connect")
+def api_vk_session_connect():
+    """Connect VK Music from data the browser already owns.
+
+    Two callers are supported: the Pulsar VK Bridge extension sends the live VK
+    session cookies (which also enable silent token refresh in memory), while the
+    bookmarklet path sends only a freshly minted short-lived web token.
+    """
+    if VKMusicService is None:
+        return api_error("VKpyMusic не установлена на сервере.", 503)
+    payload = request.get_json(silent=True) or {}
+    user_agent = str(payload.get("user_agent") or "").strip()
+    if not user_agent or len(user_agent) > 1500:
+        user_agent = request.headers.get("User-Agent", "Mozilla/5.0")
+    remixsid = _vk_clean_cookie_value(payload.get("remixsid"))
+    cookie_p = _vk_clean_cookie_value(payload.get("p"))
+    remixsid_vkcom = _vk_clean_cookie_value(payload.get("remixsidVkCom"))
+    cookie_p_vkcom = _vk_clean_cookie_value(payload.get("pVkCom"))
+    access_token = str(payload.get("access_token") or "").strip()
+    if len(access_token) > 12000:
+        return api_error("Некорректный токен VK.")
+    domain = "vk.ru"
+    if not remixsid and remixsid_vkcom:
+        remixsid, cookie_p, domain = remixsid_vkcom, cookie_p_vkcom, "vk.com"
+    s = state()
+    try:
+        if remixsid:
+            connection = _vk_cookie_connection(remixsid, cookie_p, user_agent, domain)
+            _vk_store_connection(
+                s, connection["service"], connection["user_id"], connection["user_name"],
+                remixsid=remixsid, cookie_p=cookie_p, user_agent=user_agent,
+                cookie_domain=domain, expires=connection["expires"],
+            )
+        elif access_token:
+            service = _vk_make_service(user_agent, access_token)
+            user_id, name = _vk_read_profile(service, payload.get("user_id"))
+            expires = int(payload.get("expires") or 0)
+            _vk_store_connection(s, service, user_id, name, user_agent=user_agent, expires=expires)
+        else:
+            return api_error("В браузере не найдена авторизация VK. Войди на vk.ru и повтори.", 401)
+    except Exception as exc:
+        return api_error("Не удалось подключить VK Музыку: " + str(exc)[:300], 401)
+    snapshot = _vk_session_snapshot(s)
+    snapshot.update(ok=True, message="VK Музыка подключена.")
+    return jsonify(snapshot)
+
+
+@app.get("/api/vk/session/status")
+def api_vk_session_status():
+    return jsonify({"ok": True, **_vk_session_snapshot(state())})
+
+
+@app.post("/api/vk/session/refresh")
+def api_vk_session_refresh():
+    """Re-mint the web token from the cookies kept in this session's memory."""
+    if VKMusicService is None:
+        return api_error("VKpyMusic не установлена на сервере.", 503)
+    s = state()
+    with s["lock"]:
+        remixsid = s.get("vk_remixsid")
+        cookie_p = s.get("vk_cookie_p") or ""
+        user_agent = s.get("vk_user_agent") or "Mozilla/5.0"
+        domain = s.get("vk_cookie_domain") or "vk.ru"
+    if not remixsid:
+        return api_error("Для автообновления нужна сессия VK из расширения. Войди через VK снова.", 401)
+    try:
+        connection = _vk_cookie_connection(remixsid, cookie_p, user_agent, domain)
+        _vk_store_connection(
+            s, connection["service"], connection["user_id"], connection["user_name"],
+            remixsid=remixsid, cookie_p=cookie_p, user_agent=user_agent,
+            cookie_domain=domain, expires=connection["expires"],
+        )
+    except Exception as exc:
+        with s["lock"]:
+            s["vk_auth_error"] = str(exc)[:220]
+        return api_error("Не удалось обновить доступ к VK: " + str(exc)[:260], 401)
+    return jsonify({"ok": True, **_vk_session_snapshot(s)})
 
 
 def _valid_yandex_url(url):
@@ -515,6 +688,27 @@ def static_files(filename):
     return send_from_directory(ROOT, filename)
 
 
+@app.get("/vk-bridge.zip")
+def download_vk_bridge():
+    """Download the optional browser extension that passes the VK session to Pulsar."""
+    import io
+    import zipfile
+
+    folder = ROOT / "vk_bridge"
+    if not (folder / "manifest.json").is_file():
+        abort(404)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(folder.rglob("*")):
+            if path.is_file():
+                archive.write(path, path.relative_to(ROOT).as_posix())
+    response = make_response(buffer.getvalue())
+    response.headers["Content-Type"] = "application/zip"
+    response.headers["Content-Disposition"] = 'attachment; filename="pulsar-vk-bridge.zip"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/api/status")
 def api_status():
     s = state()
@@ -542,7 +736,9 @@ def api_logout():
         remote_browser = s.get("vk_remote_browser")
         s["vk_remote_browser"] = None
         s.update(client=None, auth="idle", auth_url="", auth_code="", auth_error="", jobs={},
-                 vk_service=None, vk_user_id=None, vk_remixsid=None, vk_cookie_p=None)
+                 vk_service=None, vk_user_id=None, vk_user_name="", vk_remixsid=None,
+                 vk_cookie_p=None, vk_user_agent=None, vk_cookie_domain="",
+                 vk_token_expires=0, vk_auth_error="")
         s["auth_generation"] += 1
     if remote_browser:
         try:
@@ -1023,9 +1219,13 @@ def api_vk_connect():
         with s["lock"]:
             s["vk_service"] = service
             s["vk_user_id"] = int(user_id)
+            s["vk_user_name"] = " ".join(filter(None, [
+                getattr(info, "first_name", ""), getattr(info, "last_name", "")
+            ])) or "VK"
             s["vk_remixsid"] = None
             s["vk_cookie_p"] = None
-            s["vk_user_agent"] = None
+            s["vk_user_agent"] = user_agent
+            s["vk_cookie_domain"] = ""
             s["vk_token_expires"] = 0
             s["vk_auth_error"] = ""
         return jsonify({"ok": True, "user": {
@@ -1042,9 +1242,11 @@ def api_vk_disconnect():
     with s["lock"]:
         s["vk_service"] = None
         s["vk_user_id"] = None
+        s["vk_user_name"] = ""
         s["vk_remixsid"] = None
         s["vk_cookie_p"] = None
         s["vk_user_agent"] = None
+        s["vk_cookie_domain"] = ""
         s["vk_token_expires"] = 0
         s["vk_auth_error"] = ""
     return jsonify({"ok": True})
