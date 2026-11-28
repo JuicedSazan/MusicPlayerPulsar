@@ -7,7 +7,7 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    PORT=10000
+    PORT=3000
 
 # Chromium system libraries (Playwright's documented package set).
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -25,5 +25,5 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 COPY . .
 
-EXPOSE 10000
-CMD ["gunicorn", "server:app", "--workers", "1", "--threads", "8", "--timeout", "180", "--bind", "0.0.0.0:10000"]
+EXPOSE 3000
+CMD ["gunicorn", "server:app", "--workers", "1", "--threads", "8", "--timeout", "180", "--bind", "0.0.0.0:3000"]

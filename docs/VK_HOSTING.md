@@ -38,3 +38,20 @@ memory limit`). Ветка `test/vk-remote-browser-login` в Render-сервис
 Проверка после переноса: откройте `/health` → `200`, затем в плеере
 «Настроить VK Музыку» → «ВОЙТИ ЧЕРЕЗ VK» → QR → скан приложением ВК → сервер
 принимает код → «VK Музыка подключена» → поиск **VK** → трек играет.
+
+
+## Cloady (бесплатный 1 ГБ)
+
+Cloady собирает приложение по `Dockerfile` автоматически, но публичный порт
+назначает сам — в Space/приложении Cloady это **3000**. Поэтому в `Dockerfile`
+`PORT=3000` и `gunicorn --bind 0.0.0.0:3000`. Деплой из API:
+
+```
+POST /api/workspaces/<workspace>/deploy
+{"name":"pulsar","region":"eu1","env":"production",
+ "source":{"type":"git","repoUrl":"https://github.com/<user>/<repo>.git",
+           "branch":"feature/vk-easy-login","autoUpdate":false}}
+```
+
+Свободный план — только в регионах `eu1`, `use1`, `usw1`; на Cloady может
+потребоваться карта, если бесплатный слот аккаунта уже занят.
