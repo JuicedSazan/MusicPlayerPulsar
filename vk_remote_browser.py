@@ -107,6 +107,7 @@ class QRLoginBrowser:
         self.leaked_playwright = None
         self.serve_ready = threading.Event()
         self.code_submitted = False
+        self.last_error = ""
         self.page_info = {}
         self.thread = threading.Thread(target=self._run, name="pulsar-vk-qr", daemon=True)
         self.thread.start()
@@ -225,9 +226,12 @@ class QRLoginBrowser:
                         result_queue.put(True)
                         break
                 except Exception as exc:  # noqa: BLE001 - forwarded to the caller
+                    self.last_error = (command + ": " + type(exc).__name__ + ": "
+                                       + str(exc).replace("\n", " ")[:300])
                     result_queue.put(exc)
         except Exception as exc:  # noqa: BLE001
-            self.start_error = str(exc)[:300]
+            self.start_error = str(exc).replace("\n", " ")[:300]
+            self.last_error = "serve: " + self.start_error
             self.serve_ready.set()
             try:
                 self.commands.put_nowait(("close", {}, queue.Queue()))

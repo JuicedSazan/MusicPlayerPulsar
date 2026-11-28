@@ -684,7 +684,8 @@ def api_vk_remote_code():
         image = base64.b64encode(browser.enter_code(digits)).decode("ascii")
         return jsonify({"ok": True, "image": image, "width": browser.WIDTH, "height": browser.HEIGHT})
     except Exception as exc:
-        return api_error("Не удалось отправить код в окно VK: " + str(exc)[:200], 502)
+        detail = getattr(browser, "last_error", "") or str(exc).replace("\n", " ")
+        return api_error("Не удалось отправить код в окно VK: " + str(detail)[:300], 502)
 
 
 @app.post("/api/vk/remote/input")
@@ -739,7 +740,8 @@ def api_vk_remote_finish():
     try:
         cookies = browser.cookies()
     except Exception as exc:
-        return api_error("Не удалось прочитать сессию VK: " + str(exc)[:160], 502)
+        detail = getattr(browser, "last_error", "") or str(exc).replace("\n", " ")
+        return api_error("Не удалось прочитать сессию VK: " + str(detail)[:300], 502)
     remixsid = ""
     cookie_p = ""
     domain = "vk.ru"
