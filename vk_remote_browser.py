@@ -108,6 +108,7 @@ class QRLoginBrowser:
         self.serve_ready = threading.Event()
         self.code_submitted = False
         self.last_error = ""
+        self.code_stage = ""
         self.page_info = {}
         self.thread = threading.Thread(target=self._run, name="pulsar-vk-qr", daemon=True)
         self.thread.start()
@@ -327,6 +328,15 @@ class QRLoginBrowser:
         return self._capture(page)
 
     def _enter_code(self, page, context, code):
+        self.code_stage = "enter"
+        try:
+            return self._enter_code_impl(page, context, code, lambda value: setattr(self, "code_stage", value))
+        except Exception as exc:
+            self.last_error = ("code@" + str(getattr(self, "code_stage", "?")) + ": "
+                               + type(exc).__name__ + ": " + str(exc).replace("\n", " ")[:260])
+            raise
+
+    def _enter_code_impl(self, page, context, code, stage):
         text = str(code or "")[:12]
         frames = [page] + [item for item in page.frames if item is not page]
         filled = False
@@ -343,6 +353,7 @@ class QRLoginBrowser:
                     continue
             if filled:
                 break
+        stage("fill-done" if filled else "type")
         if not filled:
             page.keyboard.insert_text(text)
         try:
@@ -350,6 +361,7 @@ class QRLoginBrowser:
         except Exception:
             pass
         page.wait_for_timeout(900)
+        stage("click")
         for frame in frames:
             try:
                 button = frame.get_by_role(
@@ -361,6 +373,7 @@ class QRLoginBrowser:
                     break
             except Exception:
                 continue
+        stage("wait-cookie")
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             try:
@@ -382,6 +395,7 @@ class QRLoginBrowser:
                 self.code_submitted = True
                 return self._capture(page)
             page.wait_for_timeout(400)
+        stage("capture")
         self.code_submitted = True
         return self._capture(page)
 
@@ -430,7 +444,13 @@ class QRLoginBrowser:
         return USER_AGENT
 
     def cookies(self):
-        return json.loads(self._call("cookies", timeout=60))
+        self.code_stage = "cookies"
+        try:
+            return json.loads(self._call("cookies", timeout=60))
+        except Exception as exc:
+            self.last_error = ("cookies: " + type(exc).__name__ + ": "
+                               + str(exc).replace("\n", " ")[:260])
+            raise
 
     def close(self):
         if not self.closed:
