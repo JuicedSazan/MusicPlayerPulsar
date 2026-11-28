@@ -348,6 +348,10 @@ async function vkQrPoll() {
   } else {
    vkQrMessage.textContent = text;
    vkQrMessage.dataset.state = 'error';
+   if (/не запущено|закрыто/i.test(text)) {
+    vkQrStopPolling();
+    vkQrStarted = false;
+   }
   }
  } finally { vkQrBusy = false; }
 }
@@ -401,6 +405,11 @@ const vkQrCancelBtn = document.getElementById('vkRemoteCancel');
 if (vkQrCancelBtn) vkQrCancelBtn.addEventListener('click', vkQrCancel);
 const vkQrCloseBtn = document.getElementById('vkRemoteClose');
 if (vkQrCloseBtn) vkQrCloseBtn.addEventListener('click', vkQrCancel);
+const vkQrRetryBtn = document.getElementById('vkRemoteRetry');
+if (vkQrRetryBtn) vkQrRetryBtn.addEventListener('click', async function () {
+ await vkQrCancel();
+ vkQrStart();
+});
 
 
 $('vkBrowserCookieProbe').onclick=async()=>{

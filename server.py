@@ -539,28 +539,97 @@ def _valid_yandex_url(url):
 
 
 
+# One VK login window per instance. A window abandoned by a closed tab must not
+# lock the feature forever on a single-process deployment, so ownership is kept
+# here with a freshness timestamp and reclaimed after a short idle period.
+_vk_login_guard = threading.Lock()
+_vk_login_global = {"browser": None, "sid": "", "last_used": 0.0}
+_VK_LOGIN_STALE_SECONDS = 90.0
+
+
+def _vk_login_touch(browser):
+    with _vk_login_guard:
+        if _vk_login_global["browser"] is browser:
+            _vk_login_global["last_used"] = time.time()
+
+
+def _vk_login_release(browser=None):
+    """Forget the login window and close it when it is the current one."""
+    with _vk_login_guard:
+        current = _vk_login_global["browser"]
+        if browser is None or current is browser:
+            _vk_login_global.update(browser=None, sid="", last_used=0.0)
+        else:
+            current = None
+    if browser is not None:
+        try:
+            browser.close()
+        except Exception:
+            pass
+    elif current is not None:
+        try:
+            current.close()
+        except Exception:
+            pass
+
+
+def _vk_login_prepare(sid):
+    """Allow a new login for this session, closing an abandoned window first."""
+    stale = None
+    with _vk_login_guard:
+        current = _vk_login_global["browser"]
+        owner = _vk_login_global["sid"]
+        last_used = _vk_login_global["last_used"]
+        if current is None:
+            _vk_login_global.update(sid=sid, last_used=time.time())
+            return True, ""
+        if owner == sid or time.time() - last_used > _VK_LOGIN_STALE_SECONDS:
+            _vk_login_global.update(browser=None, sid=sid, last_used=time.time())
+            stale = current
+        else:
+            return False, ("Окно входа VK уже открыто в другой вкладке. Закройте его там "
+                           "или повторите через минуту.")
+    if stale is not None:
+        try:
+            stale.close()
+        except Exception:
+            pass
+    return True, ""
+
+
 # Hosted VK login prototype. Browser and cookies are isolated per Pulsar session.
 @app.post("/api/vk/remote/start")
 def api_vk_remote_start():
     s = state()
+    sid = request.environ.get("pulse.sid") or ""
     with s["lock"]:
         existing = s.get("vk_remote_browser")
+        s["vk_remote_browser"] = None
     if existing:
-        try:
-            existing.close()
-        except Exception:
-            pass
+        _vk_login_release(existing)
+    allowed, error_text = _vk_login_prepare(sid)
+    if not allowed:
+        return api_error(error_text, 409)
     try:
         from vk_remote_browser import VKRemoteBrowser
         import base64
         browser = VKRemoteBrowser()
-        with s["lock"]:
-            s["vk_remote_browser"] = browser
-        image = base64.b64encode(browser.screenshot()).decode("ascii")
-        return jsonify({"ok": True, "image": image, "width": browser.WIDTH, "height": browser.HEIGHT,
-                        "timings": getattr(browser, "timings", {})})
     except Exception as exc:
+        _vk_login_release()
         return api_error("Не удалось запустить окно входа VK: " + str(exc)[:220], 503)
+    with _vk_login_guard:
+        _vk_login_global.update(browser=browser, sid=sid, last_used=time.time())
+    with s["lock"]:
+        s["vk_remote_browser"] = browser
+    try:
+        image = base64.b64encode(browser.screenshot()).decode("ascii")
+    except Exception as exc:
+        _vk_login_release(browser)
+        with s["lock"]:
+            s["vk_remote_browser"] = None
+        return api_error("Окно VK открылось, но не отдало QR-код: " + str(exc)[:200], 502)
+    return jsonify({"ok": True, "image": image, "width": browser.WIDTH, "height": browser.HEIGHT,
+                    "timings": getattr(browser, "timings", {})})
 
 
 @app.post("/api/vk/remote/refresh")
@@ -571,6 +640,7 @@ def api_vk_remote_refresh():
         browser = s.get("vk_remote_browser")
     if not browser:
         return api_error("Окно входа VK не запущено.", 404)
+    _vk_login_touch(browser)
     try:
         import base64
         image = base64.b64encode(browser.refresh()).decode("ascii")
@@ -586,6 +656,7 @@ def api_vk_remote_screen():
         browser = s.get("vk_remote_browser")
     if not browser:
         return api_error("Сначала запусти окно авторизации VK.", 404)
+    _vk_login_touch(browser)
     try:
         return jsonify({"ok": True, "image": __import__("base64").b64encode(browser.screenshot()).decode("ascii"),
                         "width": browser.WIDTH, "height": browser.HEIGHT})
@@ -600,6 +671,7 @@ def api_vk_remote_input():
         browser = s.get("vk_remote_browser")
     if not browser:
         return api_error("Окно авторизации VK не запущено.", 404)
+    _vk_login_touch(browser)
     payload = request.get_json(silent=True) or {}
     action = payload.get("action")
     try:
@@ -632,6 +704,7 @@ def api_vk_remote_finish():
         browser = s.get("vk_remote_browser")
     if not browser:
         return api_error("Окно входа VK не запущено.", 404)
+    _vk_login_touch(browser)
     if VKMusicService is None:
         return api_error("VKpyMusic не установлена на сервере.", 503)
     try:
@@ -672,10 +745,7 @@ def api_vk_remote_finish():
         return api_error("VK принял вход, но подключить музыку не удалось: " + str(exc)[:200], 502)
     with s["lock"]:
         s["vk_remote_browser"] = None
-    try:
-        browser.close()
-    except Exception:
-        pass
+    _vk_login_release(browser)
     snapshot = _vk_session_snapshot(s)
     snapshot.update(ok=True, connected=True, message="VK Музыка подключена.")
     return jsonify(snapshot)
@@ -688,10 +758,7 @@ def api_vk_remote_close():
         browser = s.get("vk_remote_browser")
         s["vk_remote_browser"] = None
     if browser:
-        try:
-            browser.close()
-        except Exception:
-            pass
+        _vk_login_release(browser)
     return jsonify({"ok": True})
 
 
@@ -739,6 +806,7 @@ def api_logout():
     with s["lock"]:
         remote_browser = s.get("vk_remote_browser")
         s["vk_remote_browser"] = None
+        _vk_login_release(remote_browser)
         s.update(client=None, auth="idle", auth_url="", auth_code="", auth_error="", jobs={},
                  vk_service=None, vk_user_id=None, vk_user_name="", vk_remixsid=None,
                  vk_cookie_p=None, vk_user_agent=None, vk_cookie_domain="",
@@ -1662,10 +1730,7 @@ def _cleanup_loop():
                 s["vk_remote_browser"] = None
                 s.update(client=None, jobs={})
             if remote_browser:
-                try:
-                    remote_browser.close()
-                except Exception:
-                    pass
+                _vk_login_release(remote_browser)
             shutil.rmtree(CACHE_ROOT / sid, ignore_errors=True)
 
 
