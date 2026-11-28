@@ -431,7 +431,7 @@ if (vkQrRetryBtn) vkQrRetryBtn.addEventListener('click', async function () {
 async function vkQrScreenRefresh() {
  if (vkQrCheckBusy) return;
  vkQrCheckBusy = true;
- vkQrMessage.textContent = 'Проверяю, подтвердил ли VK вход… (до 40 секунд)';
+ vkQrMessage.textContent = 'Обновляю окно VK и проверяю вход…';
  vkQrMessage.dataset.state = '';
  try {
   const data = await vkQrRequest('/api/vk/remote/check', {});
@@ -447,6 +447,12 @@ async function vkQrScreenRefresh() {
   }
   vkQrMessage.textContent = data.message || 'VK пока не подтвердил вход.';
   vkQrMessage.dataset.state = '';
+  // The poll picks the session up as soon as the window reload finishes.
+  if (!vkQrStarted) {
+   vkQrStarted = true;
+   vkQrPollTimer = setInterval(vkQrPoll, 4000);
+   vkQrPoll();
+  }
  } catch (error) {
   vkQrMessage.textContent = String((error && error.message) || '');
   vkQrMessage.dataset.state = 'error';
@@ -483,12 +489,10 @@ async function vkQrSendCode() {
   }
   vkQrMessage.textContent = (data && data.error) || ('Ошибка ' + response.status);
   vkQrMessage.dataset.state = 'error';
-  if (/не принял код|не запущено|закрыто|не показал поле/i.test(vkQrMessage.textContent)) {
+  const dead = response.status === 409 || /не принял код|не запущено|закрылось|закрыто|не показал поле/i.test(vkQrMessage.textContent);
+  if (dead) {
    vkQrStopPolling();
    vkQrStarted = false;
-  }
-  if (window.console && data && data.trace) {
-   console.info('[Pulsar VK trace]', data.trace);
   }
  } catch (error) {
   vkQrMessage.textContent = 'Не удалось отправить код: ' + ((error && error.message) || '');

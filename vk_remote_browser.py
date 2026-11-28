@@ -243,6 +243,15 @@ class QRLoginBrowser:
                             "https://vk.com/", "https://login.vk.com/",
                         ])
                         result_queue.put(json.dumps(data))
+                    elif command == "check":
+                        try:
+                            self.check_scan()
+                        except Exception as exc:  # noqa: BLE001
+                            self.last_error = "check: " + type(exc).__name__
+                        finally:
+                            self._check_running = False
+                        if result_queue is not None:
+                            result_queue.put(True)
                     elif command == "close":
                         self.closed = True
                         result_queue.put(True)
@@ -547,6 +556,18 @@ class QRLoginBrowser:
                 pass
         self._wait_for_qr(page, timeout_seconds=25)
         return self._capture(page)
+
+    def start_background_check(self):
+        """Queue a page reload in the worker; return False if one is running."""
+        if getattr(self, "_check_running", False):
+            return False
+        self._check_running = True
+        try:
+            self.commands.put_nowait(("check", {}, None))
+        except Exception:
+            self._check_running = False
+            return False
+        return True
 
     def check_scan(self):
         """Reload the login page once and report whether VK now has a session."""

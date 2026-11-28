@@ -818,7 +818,7 @@ def api_vk_remote_code():
     with s["lock"]:
         browser = s.get("vk_remote_browser")
     if not browser:
-        return api_error("Окно входа VK больше не открыто. Нажмите «Снова» и отсканируйте новый QR.", 409)
+        return api_error("Окно входа VK закрылось. Нажмите «Повторить» и отсканируйте новый QR.", 409)
     _vk_login_touch(browser)
     payload = request.get_json(silent=True) or {}
     digits = re.sub(r"\D", "", str(payload.get("code") or ""))[:10]
@@ -829,27 +829,25 @@ def api_vk_remote_code():
         image = base64.b64encode(browser.enter_code(digits)).decode("ascii")
     except Exception as exc:
         message = _vk_code_failure(browser, exc)
+        if _vk_browser_gone(browser):
+            return api_error("Окно входа VK закрылось, пока я вводил код. Нажмите «Повторить».", 409)
         return jsonify({"ok": False, "error": message, "pending": True}), 502
     try:
         cookies = browser.cookies()
     except Exception as exc:
+        if _vk_browser_gone(browser):
+            return api_error("Окно входа VK закрылось. Нажмите «Повторить».", 409)
         return jsonify({"ok": False, "error": "Не удалось прочитать сессию VK: "
                         + (getattr(browser, "last_error", "") or str(exc))[:240],
                         "image": image}), 502
     remixsid, cookie_p, domain = _vk_session_from_cookies(cookies)
     if not remixsid:
-        trace = {}
-        try:
-            trace = browser.get_trace()
-        except Exception:
-            trace = {}
         try:
             browser.code_submitted = True
             browser.code_stage = "rejected"
         except Exception:
             pass
-        return jsonify({"ok": False, "error": _vk_code_failure(browser), "image": image,
-                        "trace": trace}), 401
+        return jsonify({"ok": False, "error": _vk_code_failure(browser), "image": image}), 401
     if VKMusicService is None:
         return api_error("VKpyMusic не установлена на сервере.", 503)
     try:
@@ -868,6 +866,14 @@ def api_vk_remote_code():
     snapshot = _vk_session_snapshot(s)
     snapshot.update(ok=True, connected=True, message="VK Музыка подключена.", image=image)
     return jsonify(snapshot)
+
+
+def _vk_browser_gone(browser):
+    """Whether the login window died (closed, worker crash, page lost)."""
+    if getattr(browser, "closed", False):
+        return True
+    detail = getattr(browser, "last_error", "") or ""
+    return any(word in detail for word in ("закрыто", "closed", "no-field", "Empty", "not enough values"))
 
 
 @app.post("/api/vk/remote/snapshot")
