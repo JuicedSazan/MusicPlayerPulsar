@@ -664,6 +664,27 @@ def api_vk_remote_screen():
         return api_error("Не удалось получить изображение VK: " + str(exc)[:180], 502)
 
 
+@app.post("/api/vk/remote/code")
+def api_vk_remote_code():
+    """Type the new-device confirmation code shown by the VK app into the QR page."""
+    s = state()
+    with s["lock"]:
+        browser = s.get("vk_remote_browser")
+    if not browser:
+        return api_error("Окно входа VK не запущено.", 404)
+    _vk_login_touch(browser)
+    payload = request.get_json(silent=True) or {}
+    digits = re.sub(r"\D", "", str(payload.get("code") or ""))[:10]
+    if not digits:
+        return api_error("Введите числовой код с экрана телефона.")
+    try:
+        import base64
+        image = base64.b64encode(browser.enter_code(digits)).decode("ascii")
+        return jsonify({"ok": True, "image": image, "width": browser.WIDTH, "height": browser.HEIGHT})
+    except Exception as exc:
+        return api_error("Не удалось отправить код в окно VK: " + str(exc)[:200], 502)
+
+
 @app.post("/api/vk/remote/input")
 def api_vk_remote_input():
     s = state()

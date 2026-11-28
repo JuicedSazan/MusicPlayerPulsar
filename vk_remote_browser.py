@@ -12,6 +12,7 @@ the client; they live only as long as this Pulsar session.
 import base64
 import os
 import queue
+import re
 import threading
 import time
 
@@ -164,6 +165,53 @@ class VKRemoteBrowser:
                         elif command == "scroll":
                             page.mouse.wheel(0, max(-900, min(900, args["delta"])))
                             result_queue.put(True)
+                        elif command == "code":
+                            text = str(args.get("code") or "")[:12]
+                            frames = [page] + [
+                                item for item in page.frames
+                                if item is not page and "vk" in (item.url or "")
+                            ]
+                            filled = False
+                            for frame in frames:
+                                for selector in (
+                                    'input[inputmode="numeric"]',
+                                    'input[type="tel"]',
+                                    'input[type="text"]',
+                                    'input',
+                                ):
+                                    try:
+                                        handle = frame.query_selector(selector)
+                                        if handle is not None and handle.is_visible():
+                                            handle.fill(text)
+                                            filled = True
+                                            break
+                                    except Exception:
+                                        continue
+                                if filled:
+                                    break
+                            if not filled:
+                                page.keyboard.insert_text(text)
+                            try:
+                                page.keyboard.press("Enter")
+                            except Exception:
+                                pass
+                            page.wait_for_timeout(800)
+                            clicked = False
+                            for frame in frames:
+                                try:
+                                    button = frame.get_by_role(
+                                        "button",
+                                        name=re.compile("Продолжить|Подтвердить|Войти|Далее|Отправить|Готово"),
+                                    ).first
+                                    if button is not None and button.is_visible():
+                                        button.click()
+                                        clicked = True
+                                        break
+                                except Exception:
+                                    continue
+                            if clicked:
+                                page.wait_for_timeout(600)
+                            result_queue.put(self._capture(page))
                         elif command == "cookies":
                             result_queue.put(context.cookies([
                                 "https://vk.ru/", "https://login.vk.ru/",
@@ -273,6 +321,9 @@ class VKRemoteBrowser:
 
     def scroll(self, delta):
         return self._call("scroll", {"delta": int(delta)})
+
+    def enter_code(self, code):
+        return base64.b64decode(self._call("code", {"code": str(code)}, timeout=40))
 
     def cookies(self):
         return self._call("cookies")

@@ -590,3 +590,8 @@ body[data-theme="dark"] .search-dropdown .search-result:hover{background:#1b3452
 .vk-fallback[open] summary:before{content:"▾ "}
 .vk-fallback p{font-size:10px;line-height:1.5;color:#777b6e;margin:7px 0 0}
 .vk-bookmarklet{display:inline-block;background:#24251f;color:#f4ffcf;border-radius:4px;padding:2px 6px;font-size:9px;text-decoration:none;cursor:grab}
+
+/* VK new-device code confirmation row */
+.vk-remote-code{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.vk-remote-code input{flex:1 1 180px;min-width:140px;padding:11px 12px;border:1px solid #ddd;border-radius:7px;font-size:14px;letter-spacing:2px}
+.vk-remote-code button{border:0;border-radius:7px;padding:10px 16px;background:#222;color:#fff;font-size:10px;font-weight:850;cursor:pointer}

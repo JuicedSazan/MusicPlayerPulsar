@@ -411,6 +411,49 @@ if (vkQrRetryBtn) vkQrRetryBtn.addEventListener('click', async function () {
  vkQrStart();
 });
 
+async function vkQrScreenRefresh() {
+ if (!vkQrStarted || vkQrBusy) return;
+ vkQrBusy = true;
+ try {
+  const data = await vkQrRequest('/api/vk/remote/screen', {});
+  vkQrScreen.src = 'data:image/jpeg;base64,' + data.image;
+ } catch (error) {
+  vkQrMessage.textContent = String((error && error.message) || '');
+  vkQrMessage.dataset.state = 'error';
+ } finally { vkQrBusy = false; }
+}
+
+async function vkQrSendCode() {
+ const field = document.getElementById('vkRemoteCode');
+ const code = String(field && field.value || '').replace(/\D/g, '');
+ if (!code) {
+  vkQrMessage.textContent = 'Введите числовой код, который показывает приложение ВКонтакте.';
+  vkQrMessage.dataset.state = 'error';
+  return;
+ }
+ try {
+  vkQrMessage.textContent = 'Отправляю код в окно VK…';
+  vkQrMessage.dataset.state = '';
+  const data = await vkQrRequest('/api/vk/remote/code', { code: code });
+  vkQrScreen.src = 'data:image/jpeg;base64,' + data.image;
+  if (field) field.value = '';
+  vkQrMessage.textContent = 'Код отправлен. Проверяю вход…';
+  vkQrPoll();
+ } catch (error) {
+  vkQrMessage.textContent = String((error && error.message) || '');
+  vkQrMessage.dataset.state = 'error';
+ }
+}
+
+const vkQrScreenBtn = document.getElementById('vkRemoteScreenRefresh');
+if (vkQrScreenBtn) vkQrScreenBtn.addEventListener('click', vkQrScreenRefresh);
+const vkQrCodeBtn = document.getElementById('vkRemoteCodeSend');
+if (vkQrCodeBtn) vkQrCodeBtn.addEventListener('click', vkQrSendCode);
+const vkQrCodeInput = document.getElementById('vkRemoteCode');
+if (vkQrCodeInput) vkQrCodeInput.addEventListener('keydown', function (event) {
+ if (event.key === 'Enter') { event.preventDefault(); vkQrSendCode(); }
+});
+
 
 $('vkBrowserCookieProbe').onclick=async()=>{
  const button=$('vkBrowserCookieProbe'),output=$('vkBrowserCookieMessage');
