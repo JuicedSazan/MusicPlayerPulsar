@@ -543,8 +543,10 @@ def _valid_yandex_url(url):
 # lock the feature forever on a single-process deployment, so ownership is kept
 # here with a freshness timestamp and reclaimed after a short idle period.
 _vk_login_guard = threading.Lock()
-_vk_login_global = {"browser": None, "sid": "", "last_used": 0.0}
+_vk_login_global = {"browser": None, "sid": "", "last_used": 0.0, "started": 0.0}
 _VK_LOGIN_STALE_SECONDS = 90.0
+# A login window older than this cannot finish: VK rotates the QR anyway.
+_VK_LOGIN_MAX_SECONDS = 480.0
 
 
 def _vk_login_touch(browser):
@@ -583,7 +585,9 @@ def _vk_login_prepare(sid):
         if current is None:
             _vk_login_global.update(sid=sid, last_used=time.time())
             return True, ""
-        if owner == sid or time.time() - last_used > _VK_LOGIN_STALE_SECONDS:
+        started = _vk_login_global.get("started") or 0.0
+        expired = bool(started) and time.time() - started > _VK_LOGIN_MAX_SECONDS
+        if owner == sid or expired or time.time() - last_used > _VK_LOGIN_STALE_SECONDS:
             _vk_login_global.update(browser=None, sid=sid, last_used=time.time())
             stale = current
         else:
@@ -627,7 +631,7 @@ def api_vk_remote_start():
         _vk_login_release()
         return api_error("Не удалось открыть окно входа VK: " + str(exc)[:220], 503)
     with _vk_login_guard:
-        _vk_login_global.update(browser=browser, sid=sid, last_used=time.time())
+        _vk_login_global.update(browser=browser, sid=sid, last_used=time.time(), started=time.time())
     with s["lock"]:
         s["vk_remote_browser"] = browser
     try:
@@ -641,6 +645,27 @@ def api_vk_remote_start():
     info = dict(getattr(browser, "page_info", {}) or {})
     return jsonify({"ok": True, "image": image, "width": 1280, "height": 800,
                     "timings": getattr(browser, "timings", {}), "page": info})
+
+
+@app.post("/api/vk/remote/status")
+def api_vk_remote_status():
+    """Light poll: is there a window, and does it already hold a VK session?"""
+    s = state()
+    with s["lock"]:
+        browser = s.get("vk_remote_browser")
+    if not browser:
+        if s.get("vk_user_id"):
+            return jsonify({"ok": True, "session": True, "connected": True, "checked_at": time.time()})
+        return jsonify({"ok": False, "error": "Окно входа VK закрылось. Нажмите «Повторить».",
+                        "expired": True, "checked_at": time.time()}), 409
+    _vk_login_touch(browser)
+    with _vk_login_guard:
+        started = _vk_login_global.get("started") or time.time()
+    age = time.time() - started
+    expired = age > _VK_LOGIN_MAX_SECONDS
+    return jsonify({"ok": True, "session": False, "connected": bool(s.get("vk_user_id")),
+                    "age_seconds": round(age, 1), "qr_stale": age > 150,
+                    "expired": expired, "checked_at": time.time()})
 
 
 @app.post("/api/vk/remote/check")

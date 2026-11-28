@@ -297,7 +297,7 @@ $('vkInspectAudio').onclick=async()=>{
 
 
 /* Вход в VK по QR-коду через серверный Chromium: без расширений и паролей. */
-let vkQrStarted = false, vkQrPollTimer = null, vkQrBusy = false, vkQrCodeSent = false;
+let vkQrStarted = false, vkQrPollTimer = null, vkQrBusy = false, vkQrCheckBusy = false, vkQrCodeSent = false;
 const vkQrModal = document.getElementById('vkRemoteModal');
 const vkQrScreen = document.getElementById('vkRemoteScreen');
 const vkQrLoading = document.getElementById('vkRemoteLoading');
@@ -333,27 +333,43 @@ async function vkQrPoll() {
  if (!vkQrStarted || vkQrBusy) return;
  vkQrBusy = true;
  try {
+  // A cheap status read: the window only has a session after the visitor scans
+  // and confirms, so errors here mean "not yet", not "broken".
+  const data = await vkQrRequest('/api/vk/remote/status', {});
+  if (data && data.session) {
+   await vkQrFinish();
+   return;
+  }
+  if (data && data.checked_at) {
+   vkQrMessage.textContent = data.qr_stale
+    ? 'QR-код обновился — отсканируйте новый.'
+    : 'Отсканируйте QR в приложении, затем введите код с экрана телефона.';
+   vkQrMessage.dataset.state = '';
+  }
+ } catch (error) {
+  const text = String((error && error.message) || '');
+  if (/не запущено|закрыто|истекло/i.test(text)) {
+   vkQrStopPolling();
+   vkQrStarted = false;
+   vkQrMessage.textContent = text;
+   vkQrMessage.dataset.state = 'error';
+  }
+ } finally { vkQrBusy = false; }
+}
+
+async function vkQrFinish() {
+ vkQrStopPolling();
+ vkQrStarted = false;
+ vkQrMessage.textContent = 'VK подключён. Загружаю музыку…';
+ vkQrMessage.dataset.state = 'connected';
+ try {
   const result = await vkQrRequest('/api/vk/remote/finish', {});
-  vkQrStopPolling();
-  vkQrStarted = false;
-  vkQrMessage.textContent = 'VK подключён. Загружаю музыку…';
-  vkQrMessage.dataset.state = 'connected';
   if (typeof window.__pulsarVkConnected === 'function') window.__pulsarVkConnected(result);
   setTimeout(vkQrCloseModal, 1400);
  } catch (error) {
-  const text = String((error && error.message) || '');
-  if (/ещё не подтверждён/i.test(text) && !vkQrCodeSent) {
-   vkQrMessage.textContent = 'Отсканируйте QR в приложении, затем введите код с экрана телефона.';
-   vkQrMessage.dataset.state = '';
-  } else {
-   vkQrMessage.textContent = text;
-   vkQrMessage.dataset.state = 'error';
-   if (/не запущено|закрыто|не принял код/i.test(text)) {
-    vkQrStopPolling();
-    vkQrStarted = false;
-   }
-  }
- } finally { vkQrBusy = false; }
+  vkQrMessage.textContent = String((error && error.message) || '');
+  vkQrMessage.dataset.state = 'error';
+ }
 }
 
 async function vkQrStart() {
@@ -373,7 +389,7 @@ async function vkQrStart() {
   vkQrLoading.hidden = true;
   vkQrStarted = true;
   vkQrStopPolling();
-  vkQrPollTimer = setInterval(vkQrPoll, 2000);
+  vkQrPollTimer = setInterval(vkQrPoll, 4000);
   vkQrPoll();
  } catch (error) {
   vkQrLoading.textContent = 'Не удалось открыть окно входа VK';
@@ -395,7 +411,7 @@ async function vkQrRefresh() {
  } catch (error) {
   vkQrMessage.textContent = String((error && error.message) || '');
   vkQrMessage.dataset.state = 'error';
- } finally { vkQrBusy = false; }
+ } finally { vkQrCheckBusy = false; }
 }
 
 const vkRemoteLoginBtn = document.getElementById('vkRemoteLogin');
@@ -413,9 +429,9 @@ if (vkQrRetryBtn) vkQrRetryBtn.addEventListener('click', async function () {
 });
 
 async function vkQrScreenRefresh() {
- if (vkQrBusy) return;
- vkQrBusy = true;
- vkQrMessage.textContent = 'Проверяю, подтвердил ли VK вход…';
+ if (vkQrCheckBusy) return;
+ vkQrCheckBusy = true;
+ vkQrMessage.textContent = 'Проверяю, подтвердил ли VK вход… (до 40 секунд)';
  vkQrMessage.dataset.state = '';
  try {
   const data = await vkQrRequest('/api/vk/remote/check', {});
