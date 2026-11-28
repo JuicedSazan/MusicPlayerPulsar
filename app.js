@@ -620,12 +620,14 @@ $('vkMusicConnect').onclick=async()=>{
     return snapshot;
   }
 
-  async function connect() {
+  async function connect(options) {
     if (busy) return;
+    const silent = !!(options && options.silent);
     busy = true;
     connectBtn.disabled = true;
     try {
       if (!bridgeAvailable()) {
+        if (silent) return;
         installEl.hidden = false;
         const firefox = /Firefox\//.test(navigator.userAgent);
         setMessage(firefox
@@ -637,7 +639,7 @@ $('vkMusicConnect').onclick=async()=>{
         }
         return;
       }
-      setMessage('Читаю сессию VK из браузера…', 'checking');
+      if (!silent) setMessage('Читаю сессию VK из браузера…', 'checking');
       const cookies = await requestBridgeCookies();
       if (!cookies.remixsid && !cookies.remixsidVkCom) {
         installEl.hidden = true;
@@ -645,7 +647,7 @@ $('vkMusicConnect').onclick=async()=>{
         setMessage('В браузере нет активной сессии VK. Нажмите «Открыть vk.ru», войдите в аккаунт и вернитесь на эту страницу.', 'error');
         return;
       }
-      setMessage('Подключаю VK Музыку…', 'checking');
+      if (!silent) setMessage('Подключаю VK Музыку…', 'checking');
       await connectWithPayload({
         remixsid: cookies.remixsid || '',
         p: cookies.p || '',
@@ -679,13 +681,14 @@ $('vkMusicConnect').onclick=async()=>{
   }
 
   function refreshStatus() {
-    fetch('/api/vk/session/status', { cache: 'no-store', credentials: 'same-origin' })
+    return fetch('/api/vk/session/status', { cache: 'no-store', credentials: 'same-origin' })
       .then(function (response) { return response.json(); })
       .then(function (snapshot) {
         renderStatus(snapshot);
         if (snapshot.connected && snapshot.refreshable && snapshot.expires_in_seconds != null && snapshot.expires_in_seconds < 300) {
           postJson('/api/vk/session/refresh', {}).then(renderStatus).catch(function () {});
         }
+        return snapshot;
       })
       .catch(function () {});
   }
@@ -729,6 +732,22 @@ $('vkMusicConnect').onclick=async()=>{
     });
   });
 
-  refreshStatus();
+  refreshStatus().then(function (snapshot) {
+    if (snapshot && snapshot.connected) return;
+    if (bridgeAvailable()) connect({ silent: true });
+  });
   connectFromHash();
+
+  let lastAutoAttempt = Date.now();
+  function maybeAutoConnect() {
+    if (busy || document.hidden) return;
+    if (statusEl.dataset.state === 'connected') return;
+    if (!bridgeAvailable()) return;
+    const now = Date.now();
+    if (now - lastAutoAttempt < 30000) return;
+    lastAutoAttempt = now;
+    connect({ silent: true });
+  }
+  window.addEventListener('focus', maybeAutoConnect);
+  document.addEventListener('visibilitychange', maybeAutoConnect);
 })();
