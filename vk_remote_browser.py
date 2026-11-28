@@ -215,10 +215,11 @@ class QRLoginBrowser:
                     elif command == "code":
                         result_queue.put(self._enter_code(page, context, args["code"]))
                     elif command == "cookies":
-                        result_queue.put(context.cookies([
+                        data = context.cookies([
                             "https://vk.ru/", "https://login.vk.ru/",
                             "https://vk.com/", "https://login.vk.com/",
-                        ]))
+                        ])
+                        result_queue.put(json.dumps(data))
                     elif command == "close":
                         self.closed = True
                         result_queue.put(True)
@@ -365,13 +366,15 @@ class QRLoginBrowser:
                     page.evaluate("() => window.stop()")
                 except Exception:
                     pass
-                # The session exists: stop the page from loading the VK feed,
-                # which is what pushes the process over the instance memory limit.
+                # The session exists. Keep the page frozen on the login screen:
+                # loading the feed is what pushes the process over the instance
+                # memory limit, and a frozen page keeps cookie reads safe.
                 try:
-                    page.goto("about:blank", wait_until="commit", timeout=10000)
+                    page.evaluate("() => window.stop()")
                 except Exception:
                     pass
-                break
+                self.code_submitted = True
+                return self._capture(page)
             page.wait_for_timeout(400)
         self.code_submitted = True
         return self._capture(page)
@@ -421,7 +424,7 @@ class QRLoginBrowser:
         return USER_AGENT
 
     def cookies(self):
-        return self._call("cookies")
+        return json.loads(self._call("cookies", timeout=60))
 
     def close(self):
         if not self.closed:

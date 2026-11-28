@@ -372,7 +372,7 @@ async function vkQrStart() {
   vkQrLoading.hidden = true;
   vkQrStarted = true;
   vkQrStopPolling();
-  vkQrPollTimer = setInterval(vkQrPoll, 2500);
+  vkQrPollTimer = setInterval(vkQrPoll, 2000);
   vkQrPoll();
  } catch (error) {
   vkQrLoading.textContent = 'Не удалось открыть окно входа VK';
