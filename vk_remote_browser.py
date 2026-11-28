@@ -139,7 +139,7 @@ class QRLoginBrowser:
                     for url in LOGIN_URLS:
                         try:
                             page.goto(url, wait_until="commit", timeout=45000)
-                            if self._wait_for_qr(page, timeout_seconds=20):
+                            if self._wait_for_qr(page, timeout_seconds=60):
                                 reached = True
                                 break
                         except Exception:
