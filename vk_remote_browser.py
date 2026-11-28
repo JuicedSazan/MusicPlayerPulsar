@@ -21,6 +21,8 @@ import time
 # the runtime must resolve it from Playwright's package-local directory too.
 if os.environ.get("RENDER") and not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
     os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+# Container images (for example Hugging Face Spaces) install the browser into a
+# fixed directory and pass it through this variable.
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
