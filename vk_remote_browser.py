@@ -148,7 +148,6 @@ class QRLoginBrowser:
                         raise RuntimeError(
                             "Страница входа VK не отрисовала QR-код. Попробуй ещё раз через минуту."
                         )
-                    self.timings["qr_wait_s"] = round(time.monotonic() - phase, 1)
                     self.screenshot_data = self._capture(page)
                     self.page_info = self._page_info(page)
                     self.timings["total_s"] = round(time.monotonic() - started, 1)
