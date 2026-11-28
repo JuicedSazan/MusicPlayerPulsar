@@ -1,0 +1,43 @@
+# Keeps the free Render instance awake for the VK QR login.
+#
+# On the Render free plan the service spins down after ~15 minutes without
+# inbound traffic; the first request then takes 20-60 seconds to wake it, on top
+# of the VK QR page load. This job pings the health endpoint every 10 minutes
+# from GitHub's infrastructure (free for public repositories), so the instance
+# stays warm and the login window opens quickly.
+#
+# It only targets the deployment this repository's test branch feeds: change
+# PULSAR_URL if the service URL changes, or delete this file to stop it.
+name: keep-pulsar-awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keep-pulsar-awake
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PULSAR_URL: https://pulse-vinyl-web-v11-test.onrender.com
+    steps:
+      - name: Warm up the instance
+        run: |
+          set -u
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -m 100 -w '%{http_code}' "$PULSAR_URL/health" || true)
+            echo "attempt=$attempt http=$code"
+            if [ "$code" = "200" ]; then
+              break
+            fi
+            sleep 10
+          done
+          echo "Final status: ${code:-unknown}"
