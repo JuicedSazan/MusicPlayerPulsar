@@ -1,0 +1,36 @@
+name: Validate VK login
+
+on:
+  push:
+    branches: [feature/vk-easy-login, test/vk-remote-browser-login]
+  pull_request:
+    branches: [web-v1.2.0, main]
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check Python syntax
+        run: python -m py_compile server.py vk_remote_browser.py vk_browser.py
+      - name: Check browser JavaScript syntax
+        run: node --check app.js
+
+  vk-journey:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install minimal dependencies
+        run: pip install flask yandex-music vkpymusic
+      - name: VK login -> search -> playback (offline fakes)
+        run: python tests/test_vk_e2e.py
