@@ -600,6 +600,7 @@ def _vk_login_prepare(sid):
 # Hosted VK login prototype. Browser and cookies are isolated per Pulsar session.
 @app.post("/api/vk/remote/start")
 def api_vk_remote_start():
+    """Open the VK QR login for this visitor, reusing the profile they already have."""
     s = state()
     sid = request.environ.get("pulse.sid") or ""
     with s["lock"]:
@@ -611,25 +612,26 @@ def api_vk_remote_start():
     if not allowed:
         return api_error(error_text, 409)
     try:
-        from vk_remote_browser import VKRemoteBrowser
-        import base64
-        browser = VKRemoteBrowser()
+        from vk_remote_browser import QRLoginBrowser
+        browser = QRLoginBrowser()
     except Exception as exc:
         _vk_login_release()
-        return api_error("Не удалось запустить окно входа VK: " + str(exc)[:220], 503)
+        return api_error("Не удалось открыть окно входа VK: " + str(exc)[:220], 503)
     with _vk_login_guard:
         _vk_login_global.update(browser=browser, sid=sid, last_used=time.time())
     with s["lock"]:
         s["vk_remote_browser"] = browser
     try:
+        import base64
         image = base64.b64encode(browser.screenshot()).decode("ascii")
     except Exception as exc:
         _vk_login_release(browser)
         with s["lock"]:
             s["vk_remote_browser"] = None
         return api_error("Окно VK открылось, но не отдало QR-код: " + str(exc)[:200], 502)
-    return jsonify({"ok": True, "image": image, "width": browser.WIDTH, "height": browser.HEIGHT,
-                    "timings": getattr(browser, "timings", {})})
+    info = dict(getattr(browser, "page_info", {}) or {})
+    return jsonify({"ok": True, "image": image, "width": 1280, "height": 800,
+                    "timings": getattr(browser, "timings", {}), "page": info})
 
 
 @app.post("/api/vk/remote/refresh")
