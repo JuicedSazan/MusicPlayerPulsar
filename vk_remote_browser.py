@@ -111,6 +111,7 @@ class QRLoginBrowser:
         self.last_error = ""
         self.code_stage = ""
         self.code_page_text = ""
+        self.code_visible_fields = []
         self.code_stage = ""
         self.page_info = {}
         self.thread = threading.Thread(target=self._run, name="pulsar-vk-qr", daemon=True)
@@ -330,9 +331,58 @@ class QRLoginBrowser:
         self._wait_for_qr(page, timeout_seconds=45)
         return self._capture(page)
 
+    # Inputs that must never receive the code.
+    _IGNORED_INPUTS = {"search", "hidden", "radio", "checkbox", "password", "file", "submit", "button"}
+
+    @staticmethod
+    def _usable_input(inputs):
+        """Visible textual inputs (the code boxes or the code field)."""
+        usable = []
+        for item in inputs:
+            try:
+                kind = (item.get_attribute("type") or "text").lower()
+                if kind in QRLoginBrowser._IGNORED_INPUTS:
+                    continue
+                if "search" in (item.get_attribute("inputmode") or "").lower():
+                    continue
+                if not item.is_visible():
+                    continue
+                usable.append(item)
+            except Exception:
+                continue
+        return usable
+
+    def _find_code_field(self, page, timeout_seconds=20):
+        """Wait for a real code input; return (frame, [inputs], visible-field report)."""
+        deadline = time.monotonic() + timeout_seconds
+        report = []
+        while time.monotonic() < deadline:
+            for frame in page.frames:
+                try:
+                    inputs = frame.query_selector_all("input")
+                except Exception:
+                    continue
+                if not inputs:
+                    continue
+                usable = self._usable_input(inputs)
+                if usable:
+                    # One wide field or several single-character boxes.
+                    single = [item for item in usable if (item.get_attribute("maxlength") or "") == "1"]
+                    return frame, (single or usable)
+                for item in inputs:
+                    try:
+                        report.append({
+                            "type": item.get_attribute("type"),
+                            "name": item.get_attribute("name"),
+                            "visible": bool(item.is_visible()),
+                        })
+                    except Exception:
+                        continue
+            page.wait_for_timeout(300)
+        return None, [], report
+
     def _enter_code(self, page, context, code):
-        """Type the new-device code, confirm and report the resulting state."""
-        self.code_stage = "wait-form"
+        self.code_stage = "find-field"
         try:
             return self._enter_code_impl(page, context, code)
         except Exception as exc:  # noqa: BLE001 - reported to the API caller
@@ -340,75 +390,53 @@ class QRLoginBrowser:
                                + type(exc).__name__ + ": " + str(exc).replace("\n", " ")[:240])
             raise
 
-    def _code_inputs(self, page):
-        """Live frames that can contain the code form, newest first."""
-        frames = [frame for frame in page.frames]
-        frames.sort(key=lambda frame: 0 if frame is page else 1)
-        return frames
-
-    def _wait_for_code_form(self, page, timeout_seconds=25):
-        deadline = time.monotonic() + timeout_seconds
-        while time.monotonic() < deadline:
-            for frame in self._code_inputs(page):
-                try:
-                    inputs = frame.query_selector_all('input')
-                except Exception:
-                    continue
-                if inputs:
-                    return frame, inputs
-            page.wait_for_timeout(300)
-        return None, []
-
     def _enter_code_impl(self, page, context, code):
         text = re.sub(r"\D", "", str(code or ""))[:10]
         if not text:
             raise RuntimeError("пустой код")
-        self.code_stage = "wait-form"
-        frame, inputs = self._wait_for_code_form(page)
+        frame, fields, report = self._find_code_field(page)
+        self.code_visible_fields = report[:12]
+        if frame is None or not fields:
+            self.code_page_text = self._page_text(page) + " || " + self._frame_text(page)
+            self.last_error = ("code@no-field: не нашёл поле кода. Видимые поля: "
+                               + str(self.code_visible_fields)[:240])
+            self.code_submitted = True
+            return self._capture(page)
         self.code_stage = "fill"
-        filled = False
-        if frame is not None:
-            visible = [item for item in inputs if item.is_visible()] or inputs
-            try:
-                if len(visible) >= len(text) and len(visible) > 1:
-                    # Six single-character boxes.
-                    for index, char in enumerate(text):
-                        visible[index].click(timeout=3000)
-                        visible[index].type(char, delay=30)
-                    filled = True
-                elif visible:
-                    visible[0].click(timeout=3000)
-                    visible[0].fill(text)
-                    filled = True
-            except Exception as exc:  # noqa: BLE001
-                self.last_error = "code@fill: " + type(exc).__name__ + ": " + str(exc)[:200]
-                filled = False
-        if not filled:
-            page.keyboard.insert_text(text)
-        page.wait_for_timeout(500)
+        if len(fields) > 1:
+            for index, char in enumerate(text):
+                target = fields[index] if index < len(fields) else fields[-1]
+                target.click(timeout=3000)
+                target.type(char, delay=30)
+        else:
+            fields[0].click(timeout=3000)
+            fields[0].fill(text)
+        page.wait_for_timeout(400)
         self.code_stage = "submit"
-        submitted = False
-        for target in self._code_inputs(page):
-            for pattern in ("Продолжить", "Подтвердить", "Войти", "Далее", "Отправить", "Готово",
-                            "Continue", "Confirm", "Next", "Submit"):
-                try:
-                    button = target.get_by_role("button", name=re.compile(pattern)).first
-                    if button is not None and button.is_visible() and button.is_enabled():
-                        button.click(timeout=4000)
-                        submitted = True
-                        break
-                except Exception:
-                    continue
-            if submitted:
-                break
-        if not submitted:
+        clicked = False
+        try:
+            container = fields[0].evaluate_handle("el => el.closest('form') || el.parentElement")
+            element = container.as_element()
+            if element is not None:
+                for pattern in ("Продолжить", "Подтвердить", "Войти", "Далее", "Отправить", "Готово",
+                                "Continue", "Confirm", "Next"):
+                    try:
+                        button = element.get_by_role("button", name=re.compile(pattern)).first
+                        if button is not None and button.is_visible() and button.is_enabled():
+                            button.click(timeout=4000)
+                            clicked = True
+                            break
+                    except Exception:
+                        continue
+        except Exception:
+            clicked = False
+        if not clicked:
             try:
                 page.keyboard.press("Enter")
             except Exception:
                 pass
-        page.wait_for_timeout(1500)
         self.code_stage = "wait-cookie"
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 10
         got_session = False
         while time.monotonic() < deadline:
             try:
@@ -418,7 +446,7 @@ class QRLoginBrowser:
             if "remixsid" in names:
                 got_session = True
                 break
-            page.wait_for_timeout(400)
+            page.wait_for_timeout(300)
         try:
             page.evaluate("() => window.stop()")
         except Exception:
@@ -442,6 +470,7 @@ class QRLoginBrowser:
 
     @staticmethod
     def _frame_text(page):
+        """Visible text of the VK ID frames, compacted."""
         chunks = []
         for frame in page.frames:
             if frame is page:
