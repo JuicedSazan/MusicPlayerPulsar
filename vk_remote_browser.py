@@ -24,6 +24,42 @@ if os.environ.get("RENDER") and not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
 
 
 _BROWSER_SLOT = threading.BoundedSemaphore(1)
+_SLOT_STATE = {"acquired_at": 0.0, "lock": threading.Lock()}
+_SLOT_STALE_SECONDS = 300
+
+
+def _acquire_slot():
+    """Take the single login slot, stealing it when a previous holder went stale.
+
+    A crashed or abandoned login must not lock the only window forever on a
+    single-process instance, so a slot held for longer than five minutes is
+    released and taken over.
+    """
+    if _BROWSER_SLOT.acquire(blocking=False):
+        with _SLOT_STATE["lock"]:
+            _SLOT_STATE["acquired_at"] = time.monotonic()
+        return True
+    with _SLOT_STATE["lock"]:
+        acquired_at = _SLOT_STATE["acquired_at"]
+    if acquired_at and time.monotonic() - acquired_at > _SLOT_STALE_SECONDS:
+        try:
+            _BROWSER_SLOT.release()
+        except ValueError:
+            pass
+        if _BROWSER_SLOT.acquire(blocking=False):
+            with _SLOT_STATE["lock"]:
+                _SLOT_STATE["acquired_at"] = time.monotonic()
+            return True
+    return False
+
+
+def _free_slot():
+    with _SLOT_STATE["lock"]:
+        _SLOT_STATE["acquired_at"] = 0.0
+    try:
+        _BROWSER_SLOT.release()
+    except ValueError:
+        pass
 
 
 class VKRemoteBrowser:
@@ -37,8 +73,10 @@ class VKRemoteBrowser:
     )
 
     def __init__(self):
-        if not _BROWSER_SLOT.acquire(blocking=False):
-            raise RuntimeError("На бесплатном сервере доступно одно окно входа VK одновременно. Попробуй позже.")
+        if not _acquire_slot():
+            raise RuntimeError(
+                "Окно входа VK уже открыто (одно на инстанс). Закрой его или повтори через минуту."
+            )
         self._slot_released = False
         self.commands = queue.Queue()
         self.ready = threading.Event()
@@ -206,7 +244,7 @@ class VKRemoteBrowser:
     def _release_slot(self):
         if not self._slot_released:
             self._slot_released = True
-            _BROWSER_SLOT.release()
+            _free_slot()
 
     def _call(self, command, args=None, timeout=30):
         if self.closed:
