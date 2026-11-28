@@ -557,7 +557,8 @@ def api_vk_remote_start():
         with s["lock"]:
             s["vk_remote_browser"] = browser
         image = base64.b64encode(browser.screenshot()).decode("ascii")
-        return jsonify({"ok": True, "image": image, "width": browser.WIDTH, "height": browser.HEIGHT})
+        return jsonify({"ok": True, "image": image, "width": browser.WIDTH, "height": browser.HEIGHT,
+                        "timings": getattr(browser, "timings", {})})
     except Exception as exc:
         return api_error("Не удалось запустить окно входа VK: " + str(exc)[:220], 503)
 

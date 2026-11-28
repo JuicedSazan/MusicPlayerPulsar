@@ -44,6 +44,7 @@ class VKRemoteBrowser:
         self.ready = threading.Event()
         self.start_error = None
         self.closed = False
+        self.timings = {}
         self.thread = threading.Thread(target=self._run, name="pulsar-vk-qr", daemon=True)
         self.thread.start()
         if not self.ready.wait(80):
@@ -64,6 +65,7 @@ class VKRemoteBrowser:
                         + str(executable) + "; PLAYWRIGHT_BROWSERS_PATH="
                         + repr(os.environ.get("PLAYWRIGHT_BROWSERS_PATH"))
                     )
+                phase = time.monotonic()
                 browser = p.chromium.launch(
                     channel="chromium",
                     headless=True,
@@ -85,13 +87,22 @@ class VKRemoteBrowser:
                     if route.request.resource_type in ("font", "media")
                     else route.continue_(),
                 )
+                self.timings["launch_s"] = round(time.monotonic() - phase, 1)
+                phase = time.monotonic()
                 page = context.new_page()
                 page.set_default_timeout(20000)
                 page.goto("https://vk.ru/", wait_until="domcontentloaded", timeout=90000)
                 page.wait_for_timeout(1500)
+                self.timings["goto_s"] = round(time.monotonic() - phase, 1)
+                phase = time.monotonic()
                 self.browser, self.context, self.page = browser, context, page
                 self._wait_for_qr(page)
+                self.timings["qr_wait_s"] = round(time.monotonic() - phase, 1)
                 self._prepare_screenshot(page)
+                self.timings["total_s"] = round(
+                    self.timings.get("launch_s", 0)
+                    + self.timings.get("goto_s", 0)
+                    + self.timings.get("qr_wait_s", 0), 1)
                 self.ready.set()
                 while True:
                     command, args, result_queue = self.commands.get()
