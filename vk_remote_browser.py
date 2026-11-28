@@ -13,6 +13,7 @@ import base64
 import os
 import queue
 import threading
+import time
 
 # Render may omit service-level env vars from the Gunicorn runtime even when
 # they are present in render.yaml. Match the build command explicitly on Render:
@@ -87,8 +88,9 @@ class VKRemoteBrowser:
                 page = context.new_page()
                 page.set_default_timeout(20000)
                 page.goto("https://vk.ru/", wait_until="domcontentloaded", timeout=90000)
-                page.wait_for_timeout(4000)
+                page.wait_for_timeout(1500)
                 self.browser, self.context, self.page = browser, context, page
+                self._wait_for_qr(page)
                 self._prepare_screenshot(page)
                 self.ready.set()
                 while True:
@@ -98,7 +100,8 @@ class VKRemoteBrowser:
                             result_queue.put(self._capture(page))
                         elif command == "refresh":
                             page.goto("https://vk.ru/", wait_until="domcontentloaded", timeout=90000)
-                            page.wait_for_timeout(3000)
+                            page.wait_for_timeout(1500)
+                            self._wait_for_qr(page)
                             result_queue.put(self._capture(page))
                         elif command == "click":
                             page.mouse.click(max(0, min(self.WIDTH, args["x"])),
@@ -133,8 +136,43 @@ class VKRemoteBrowser:
             self.ready.set()
 
     @staticmethod
+    def _wait_for_qr(page, timeout_seconds=25):
+        """Wait until the VK ID QR widget inside its iframe has actually rendered.
+
+        The QR code is an SVG drawn by a cross-origin iframe. A screenshot taken
+        before that frame paints is an empty white card, which is exactly what a
+        small hosting instance can produce while the frame is still loading.
+        """
+        deadline = time.monotonic() + timeout_seconds
+        try:
+            page.wait_for_selector("iframe[src*='qr_auth']", timeout=30000)
+        except Exception:
+            pass
+        while time.monotonic() < deadline:
+            for frame in page.frames:
+                if "qr_auth" not in (frame.url or ""):
+                    continue
+                try:
+                    rendered = frame.evaluate(
+                        """() => {
+                          const svgs = Array.from(document.querySelectorAll('svg'));
+                          return svgs.some(item => {
+                            const box = item.getBoundingClientRect();
+                            return box.width >= 100 && box.height >= 100;
+                          });
+                        }"""
+                    )
+                except Exception:
+                    rendered = False
+                if rendered:
+                    page.wait_for_timeout(600)
+                    return True
+            page.wait_for_timeout(400)
+        return False
+
+    @staticmethod
     def _prepare_screenshot(page):
-        """Use the DevTools screenshot command so VK's font loading cannot stall it."""
+        """Let layout settle; the QR readiness check does the real waiting."""
         try:
             page.wait_for_load_state("networkidle", timeout=8000)
         except Exception:
