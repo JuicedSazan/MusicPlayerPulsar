@@ -122,15 +122,14 @@ class VKRemoteBrowser:
                 context.route(
                     "**/*",
                     lambda route: route.abort()
-                    if route.request.resource_type in ("font", "media")
+                    if route.request.resource_type in ("font", "media", "image")
                     else route.continue_(),
                 )
                 self.timings["launch_s"] = round(time.monotonic() - phase, 1)
                 phase = time.monotonic()
                 page = context.new_page()
                 page.set_default_timeout(20000)
-                page.goto("https://vk.ru/", wait_until="domcontentloaded", timeout=90000)
-                page.wait_for_timeout(1500)
+                page.goto("https://vk.ru/", wait_until="commit", timeout=90000)
                 self.timings["goto_s"] = round(time.monotonic() - phase, 1)
                 phase = time.monotonic()
                 self.browser, self.context, self.page = browser, context, page
@@ -148,9 +147,9 @@ class VKRemoteBrowser:
                         if command == "screenshot":
                             result_queue.put(self._capture(page))
                         elif command == "refresh":
-                            page.goto("https://vk.ru/", wait_until="domcontentloaded", timeout=90000)
-                            page.wait_for_timeout(1500)
+                            page.goto("https://vk.ru/", wait_until="commit", timeout=90000)
                             self._wait_for_qr(page)
+                            self._prepare_screenshot(page)
                             result_queue.put(self._capture(page))
                         elif command == "click":
                             page.mouse.click(max(0, min(self.WIDTH, args["x"])),
@@ -221,11 +220,8 @@ class VKRemoteBrowser:
 
     @staticmethod
     def _prepare_screenshot(page):
-        """Let layout settle; the QR readiness check does the real waiting."""
-        try:
-            page.wait_for_load_state("networkidle", timeout=8000)
-        except Exception:
-            pass
+        """Short settle after the QR is ready; the readiness check did the waiting."""
+        page.wait_for_timeout(300)
 
     @staticmethod
     def _capture(page):
