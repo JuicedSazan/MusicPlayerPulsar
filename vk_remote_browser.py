@@ -413,17 +413,6 @@ class QRLoginBrowser:
             raise RuntimeError("пустой код")
         self._trace("code-requested", page)
         frame, fields, report = self._find_code_field(page, timeout_seconds=12)
-        if not fields:
-            self._trace("qr-refresh-before-code", page)
-            try:
-                page.reload(wait_until="commit", timeout=45000)
-            except Exception:
-                try:
-                    page.goto("https://vk.ru/", wait_until="commit", timeout=45000)
-                except Exception:
-                    pass
-            self._wait_for_qr(page, timeout_seconds=25)
-            frame, fields, report = self._find_code_field(page, timeout_seconds=12)
         self._trace("code-field-search", page)
         self.code_visible_fields = report[:12]
         if frame is None or not fields:

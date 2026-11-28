@@ -645,7 +645,7 @@ def api_vk_remote_start():
 
 @app.post("/api/vk/remote/reload")
 def api_vk_remote_reload():
-    """Reload the server-side VK page and capture what it shows now."""
+    """Capture the VK window now (no page reload: the worker must stay responsive)."""
     s = state()
     with s["lock"]:
         browser = s.get("vk_remote_browser")
@@ -654,9 +654,9 @@ def api_vk_remote_reload():
     _vk_login_touch(browser)
     try:
         import base64
-        image = base64.b64encode(browser.refresh()).decode("ascii")
+        image = base64.b64encode(browser.screenshot()).decode("ascii")
     except Exception as exc:
-        return jsonify({"ok": False, "error": "Не удалось перезагрузить экран VK: "
+        return jsonify({"ok": False, "error": "Не удалось снять экран VK: "
                         + (getattr(browser, "last_error", "") or str(exc))[:220]}), 502
     trace = {}
     try:
