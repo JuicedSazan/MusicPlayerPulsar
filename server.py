@@ -539,6 +539,18 @@ def _valid_yandex_url(url):
 
 
 
+def _vk_window_get(s):
+    """The live login window for this visit, adopting the process-wide one."""
+    with _vk_login_guard:
+        shared = _vk_login_global["browser"]
+    with s["lock"]:
+        local = s.get("vk_remote_browser")
+        if local is None and shared is not None:
+            s["vk_remote_browser"] = shared
+            local = shared
+    return local
+
+
 # One VK login window per instance. A window abandoned by a closed tab must not
 # lock the feature forever on a single-process deployment, so ownership is kept
 # here with a freshness timestamp and reclaimed after a short idle period.
@@ -607,8 +619,8 @@ def api_vk_remote_start():
     """Open the VK QR login for this visitor, reusing the profile they already have."""
     s = state()
     sid = request.environ.get("pulse.sid") or ""
+    existing = _vk_window_get(s)
     with s["lock"]:
-        existing = s.get("vk_remote_browser")
         s["vk_remote_browser"] = None
     if existing:
         _vk_login_release(existing)
@@ -651,8 +663,7 @@ def api_vk_remote_start():
 def api_vk_remote_status():
     """Light poll: is there a window, and does it already hold a VK session?"""
     s = state()
-    with s["lock"]:
-        browser = s.get("vk_remote_browser")
+    browser = _vk_window_get(s)
     if not browser:
         if s.get("vk_user_id"):
             return jsonify({"ok": True, "session": True, "connected": True, "checked_at": time.time()})
@@ -672,8 +683,7 @@ def api_vk_remote_status():
 def api_vk_remote_check():
     """Ask the window to reload in the background and answer immediately."""
     s = state()
-    with s["lock"]:
-        browser = s.get("vk_remote_browser")
+    browser = _vk_window_get(s)
     if not browser:
         return api_error("Окно входа VK закрылось. Нажмите «Повторить».", 409)
     _vk_login_touch(browser)
@@ -690,8 +700,7 @@ def api_vk_remote_check():
 def api_vk_remote_reload():
     """Capture the VK window now (no page reload: the worker must stay responsive)."""
     s = state()
-    with s["lock"]:
-        browser = s.get("vk_remote_browser")
+    browser = _vk_window_get(s)
     if not browser:
         return api_error("Окно входа VK не открыто.", 404)
     _vk_login_touch(browser)
@@ -714,8 +723,7 @@ def api_vk_remote_reload():
 def api_vk_remote_refresh():
     """Reload the QR login page and return a fresh screenshot."""
     s = state()
-    with s["lock"]:
-        browser = s.get("vk_remote_browser")
+    browser = _vk_window_get(s)
     if not browser:
         return api_error("Окно входа VK не запущено.", 404)
     _vk_login_touch(browser)
@@ -730,8 +738,7 @@ def api_vk_remote_refresh():
 @app.post("/api/vk/remote/screen")
 def api_vk_remote_screen():
     s = state()
-    with s["lock"]:
-        browser = s.get("vk_remote_browser")
+    browser = _vk_window_get(s)
     if not browser:
         return api_error("Сначала запусти окно авторизации VK.", 404)
     _vk_login_touch(browser)
@@ -786,8 +793,7 @@ def _vk_code_failure(browser, exc=None):
 def api_vk_remote_code():
     """Type the new-device confirmation code and connect VK Music right away."""
     s = state()
-    with s["lock"]:
-        browser = s.get("vk_remote_browser")
+    browser = _vk_window_get(s)
     if not browser:
         return api_error("Окно входа VK закрылось. Нажмите «Повторить» и отсканируйте новый QR.", 409)
     _vk_login_touch(browser)
@@ -851,8 +857,7 @@ def _vk_browser_gone(browser):
 def api_vk_remote_snapshot():
     """Fresh picture of the server-side VK window, for diagnosing the login."""
     s = state()
-    with s["lock"]:
-        browser = s.get("vk_remote_browser")
+    browser = _vk_window_get(s)
     if not browser:
         return api_error("Окно входа VK не открыто.", 404)
     _vk_login_touch(browser)
@@ -877,8 +882,7 @@ def api_vk_remote_snapshot():
 @app.post("/api/vk/remote/input")
 def api_vk_remote_input():
     s = state()
-    with s["lock"]:
-        browser = s.get("vk_remote_browser")
+    browser = _vk_window_get(s)
     if not browser:
         return api_error("Окно авторизации VK не запущено.", 404)
     _vk_login_touch(browser)
@@ -916,8 +920,7 @@ def api_vk_remote_finish():
     endpoint reads that cookie before the page can grow.
     """
     s = state()
-    with s["lock"]:
-        browser = s.get("vk_remote_browser")
+    browser = _vk_window_get(s)
     if not browser:
         return api_error("Окно входа VK не запущено.", 404)
     _vk_login_touch(browser)
@@ -955,8 +958,8 @@ def api_vk_remote_finish():
 @app.post("/api/vk/remote/close")
 def api_vk_remote_close():
     s = state()
+    browser = _vk_window_get(s)
     with s["lock"]:
-        browser = s.get("vk_remote_browser")
         s["vk_remote_browser"] = None
     if browser:
         _vk_login_release(browser)
