@@ -139,7 +139,7 @@ class QRLoginBrowser:
                     for url in LOGIN_URLS:
                         try:
                             page.goto(url, wait_until="commit", timeout=45000)
-                            if self._wait_for_qr(page, timeout_seconds=60):
+                            if self._wait_for_qr(page, timeout_seconds=20):
                                 reached = True
                                 break
                         except Exception:
@@ -248,7 +248,7 @@ class QRLoginBrowser:
             self._release_slot()
 
     @staticmethod
-    def _wait_for_qr(page, timeout_seconds=40):
+    def _wait_for_qr(page, timeout_seconds=40, hold_last=True):
         deadline = time.monotonic() + timeout_seconds
         seen_frame = False
         while time.monotonic() < deadline:
@@ -272,7 +272,9 @@ class QRLoginBrowser:
                     page.wait_for_timeout(1500)
                     return True
             page.wait_for_timeout(300)
-        if seen_frame:
+        # The scrollable code page hides the QR frame: prefer the first
+        # screenshot over a long poll when the page cannot be detected.
+        if hold_last:
             page.wait_for_timeout(1500)
             return True
         return False
