@@ -105,6 +105,7 @@ class QRLoginBrowser:
         self.closed = False
         self.screenshot_data = None
         self.leaked_playwright = None
+        self.serve_ready = threading.Event()
         self.page_info = {}
         self.thread = threading.Thread(target=self._run, name="pulsar-vk-qr", daemon=True)
         self.thread.start()
@@ -176,68 +177,71 @@ class QRLoginBrowser:
             self._release_slot()
 
     def _serve(self):
-        """Stay alive for one session and answer commands on a fresh browser."""
+        """Answer QR refreshes and the numeric code while the visitor confirms."""
         p = self.leaked_playwright
+        browser = None
         try:
-            if True:
-                browser = p.chromium.launch(channel="chromium", headless=True, args=LAUNCH_ARGS)
+            browser = p.chromium.launch(channel="chromium", headless=True, args=LAUNCH_ARGS)
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 800},
+                locale="ru-RU",
+                user_agent=USER_AGENT,
+                device_scale_factor=1,
+            )
+            context.route("**/*", lambda route: route.abort() if _should_abort(route.request) else route.continue_())
+            page = context.new_page()
+            page.set_default_timeout(30000)
+            # Follow the live page that session 1 already loaded: opening another
+            # login in a different context can be refused by VK as a new device.
+            page.goto("https://vk.ru/", wait_until="commit", timeout=45000)
+            self._wait_for_qr(page, timeout_seconds=45)
+            self.serve_ready.set()
+            while True:
+                command, args, result_queue = self.commands.get()
                 try:
-                    context = browser.new_context(
-                        viewport={"width": 1280, "height": 800},
-                        locale="ru-RU",
-                        user_agent=USER_AGENT,
-                        device_scale_factor=1,
-                    )
-                    context.route("**/*", lambda route: route.abort() if _should_abort(route.request) else route.continue_())
-                    page = context.new_page()
-                    page.set_default_timeout(25000)
-                    page.goto("https://vk.ru/", wait_until="commit", timeout=45000)
-                    self._wait_for_qr(page, timeout_seconds=40)
-                    while True:
-                        command, args, result_queue = self.commands.get()
-                        try:
-                            if command == "screenshot":
-                                result_queue.put(self._capture(page))
-                            elif command == "refresh":
-                                result_queue.put(self._refresh(page))
-                            elif command == "click":
-                                page.mouse.click(max(0, min(1280, args["x"])),
-                                                 max(0, min(800, args["y"])))
-                                result_queue.put(True)
-                            elif command == "type":
-                                page.keyboard.insert_text(args["text"][:2000])
-                                result_queue.put(True)
-                            elif command == "press":
-                                page.keyboard.press(args["key"][:30])
-                                result_queue.put(True)
-                            elif command == "scroll":
-                                page.mouse.wheel(0, max(-900, min(900, args["delta"])))
-                                result_queue.put(True)
-                            elif command == "code":
-                                result_queue.put(self._enter_code(page, context, args["code"]))
-                            elif command == "cookies":
-                                result_queue.put(context.cookies([
-                                    "https://vk.ru/", "https://login.vk.ru/",
-                                    "https://vk.com/", "https://login.vk.com/",
-                                ]))
-                            elif command == "close":
-                                self.closed = True
-                                result_queue.put(True)
-                                break
-                        except Exception as exc:  # noqa: BLE001 - forwarded to the caller
-                            result_queue.put(exc)
-                finally:
-                    try:
-                        browser.close()
-                    except Exception:
-                        pass
+                    if command == "screenshot":
+                        result_queue.put(self._capture(page))
+                    elif command == "refresh":
+                        result_queue.put(self._refresh(page))
+                    elif command == "click":
+                        page.mouse.click(max(0, min(1280, args["x"])),
+                                         max(0, min(800, args["y"])))
+                        result_queue.put(True)
+                    elif command == "type":
+                        page.keyboard.insert_text(args["text"][:2000])
+                        result_queue.put(True)
+                    elif command == "press":
+                        page.keyboard.press(args["key"][:30])
+                        result_queue.put(True)
+                    elif command == "scroll":
+                        page.mouse.wheel(0, max(-900, min(900, args["delta"])))
+                        result_queue.put(True)
+                    elif command == "code":
+                        result_queue.put(self._enter_code(page, context, args["code"]))
+                    elif command == "cookies":
+                        result_queue.put(context.cookies([
+                            "https://vk.ru/", "https://login.vk.ru/",
+                            "https://vk.com/", "https://login.vk.com/",
+                        ]))
+                    elif command == "close":
+                        self.closed = True
+                        result_queue.put(True)
+                        break
+                except Exception as exc:  # noqa: BLE001 - forwarded to the caller
+                    result_queue.put(exc)
         except Exception as exc:  # noqa: BLE001
             self.start_error = str(exc)[:300]
+            self.serve_ready.set()
             try:
                 self.commands.put_nowait(("close", {}, queue.Queue()))
             except Exception:
                 pass
         finally:
+            try:
+                if browser is not None:
+                    browser.close()
+            except Exception:
+                pass
             try:
                 if self.leaked_playwright is not None:
                     self.leaked_playwright.stop()
@@ -246,7 +250,6 @@ class QRLoginBrowser:
             self.leaked_playwright = None
             self._release_slot()
 
-    # ---------------------------------------------------------------- helpers
     @staticmethod
     def _wait_for_qr(page, timeout_seconds=40):
         deadline = time.monotonic() + timeout_seconds
@@ -312,9 +315,12 @@ class QRLoginBrowser:
         return {"text_sample": text[:300], "code_prompt": bool(code_prompt), "logged_in": bool(logged_in)}
 
     def _refresh(self, page):
-        """Load a brand-new QR in the same browser."""
-        page.goto("https://vk.ru/", wait_until="commit", timeout=45000)
-        self._wait_for_qr(page, timeout_seconds=40)
+        """Reload the current VK page and capture it."""
+        try:
+            page.reload(wait_until="commit", timeout=45000)
+        except Exception:
+            page.goto("https://vk.ru/", wait_until="commit", timeout=45000)
+        self._wait_for_qr(page, timeout_seconds=45)
         return self._capture(page)
 
     def _enter_code(self, page, context, code):
