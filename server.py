@@ -721,7 +721,13 @@ def api_vk_remote_input():
 
 @app.post("/api/vk/remote/finish")
 def api_vk_remote_finish():
-    """Poll the QR login: as soon as VK sets the session cookies, connect VK Music."""
+    """Connect VK Music once the QR login has been confirmed on the phone.
+
+    After the numeric code is accepted the VK page would load the feed, which the
+    small hosting instance cannot hold. So once the visitor submitted the code,
+    the browser stops at a blank page (the session cookie is already set) and this
+    endpoint reads that cookie before the page can grow.
+    """
     s = state()
     with s["lock"]:
         browser = s.get("vk_remote_browser")
@@ -751,11 +757,14 @@ def api_vk_remote_finish():
                 domain = "vk.ru"
             elif name == "p" and not cookie_p:
                 cookie_p = value
-        elif cookie_domain.endswith("vk.com") and not remixsid:
-            if name == "remixsid":
-                domain = "vk.com"
+        elif cookie_domain.endswith("vk.com") and not remixsid and name == "remixsid":
+            remixsid = value
+            domain = "vk.com"
     if not remixsid:
-        return api_error("QR-код ещё не подтверждён в приложении VK.", 401)
+        submitted = bool(getattr(browser, "code_submitted", False))
+        return api_error(
+            "Код отправлен, но сессия VK ещё не появилась. Подожди пару секунд." if submitted
+            else "QR-код ещё не подтверждён в приложении VK.", 401)
     user_agent = browser.user_agent()
     try:
         connection = _vk_cookie_connection(remixsid, cookie_p, user_agent, domain)

@@ -106,6 +106,7 @@ class QRLoginBrowser:
         self.screenshot_data = None
         self.leaked_playwright = None
         self.serve_ready = threading.Event()
+        self.code_submitted = False
         self.page_info = {}
         self.thread = threading.Thread(target=self._run, name="pulsar-vk-qr", daemon=True)
         self.thread.start()
@@ -364,8 +365,15 @@ class QRLoginBrowser:
                     page.evaluate("() => window.stop()")
                 except Exception:
                     pass
+                # The session exists: stop the page from loading the VK feed,
+                # which is what pushes the process over the instance memory limit.
+                try:
+                    page.goto("about:blank", wait_until="commit", timeout=10000)
+                except Exception:
+                    pass
                 break
             page.wait_for_timeout(400)
+        self.code_submitted = True
         return self._capture(page)
 
     # --------------------------------------------------------------- commands
