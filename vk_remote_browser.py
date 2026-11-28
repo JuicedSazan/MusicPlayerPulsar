@@ -331,72 +331,83 @@ class QRLoginBrowser:
         return self._capture(page)
 
     def _enter_code(self, page, context, code):
-        self.code_stage = "enter"
+        """Type the new-device code, confirm and report the resulting state."""
+        self.code_stage = "wait-form"
         try:
-            return self._enter_code_impl(page, context, code, lambda value: setattr(self, "code_stage", value))
-        except Exception as exc:
+            return self._enter_code_impl(page, context, code)
+        except Exception as exc:  # noqa: BLE001 - reported to the API caller
             self.last_error = ("code@" + str(getattr(self, "code_stage", "?")) + ": "
-                               + type(exc).__name__ + ": " + str(exc).replace("\n", " ")[:260])
+                               + type(exc).__name__ + ": " + str(exc).replace("\n", " ")[:240])
             raise
 
-    def _enter_code_impl(self, page, context, code, stage):
-        text = str(code or "")[:12]
-        frames = [page] + [item for item in page.frames if item is not page]
-        stage("fill")
+    def _code_inputs(self, page):
+        """Live frames that can contain the code form, newest first."""
+        frames = [frame for frame in page.frames]
+        frames.sort(key=lambda frame: 0 if frame is page else 1)
+        return frames
+
+    def _wait_for_code_form(self, page, timeout_seconds=25):
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            for frame in self._code_inputs(page):
+                try:
+                    inputs = frame.query_selector_all('input')
+                except Exception:
+                    continue
+                if inputs:
+                    return frame, inputs
+            page.wait_for_timeout(300)
+        return None, []
+
+    def _enter_code_impl(self, page, context, code):
+        text = re.sub(r"\D", "", str(code or ""))[:10]
+        if not text:
+            raise RuntimeError("пустой код")
+        self.code_stage = "wait-form"
+        frame, inputs = self._wait_for_code_form(page)
+        self.code_stage = "fill"
         filled = False
-        for frame in frames:
+        if frame is not None:
+            visible = [item for item in inputs if item.is_visible()] or inputs
             try:
-                # VK renders six single-character boxes for the new-device code.
-                if frame.query_selector('input[maxlength="1"]') is not None:
-                    boxes = frame.query_selector_all('input[maxlength="1"], input[inputmode="numeric"][maxlength="1"]')
-                    if len(boxes) >= len(text):
-                        for index, char in enumerate(text):
-                            boxes[index].click()
-                            boxes[index].type(char, delay=20)
-                        filled = True
-                    break
-            except Exception:
-                continue
-        if not filled:
-            for frame in frames:
-                for selector in ('input[inputmode="numeric"]', 'input[type="tel"]',
-                                 'input[type="text"]', 'input'):
-                    try:
-                        handle = frame.query_selector(selector)
-                        if handle is not None and handle.is_visible():
-                            handle.fill(text)
-                            filled = True
-                            break
-                    except Exception:
-                        continue
-                if filled:
-                    break
-        stage("fill-done" if filled else "type")
+                if len(visible) >= len(text) and len(visible) > 1:
+                    # Six single-character boxes.
+                    for index, char in enumerate(text):
+                        visible[index].click(timeout=3000)
+                        visible[index].type(char, delay=30)
+                    filled = True
+                elif visible:
+                    visible[0].click(timeout=3000)
+                    visible[0].fill(text)
+                    filled = True
+            except Exception as exc:  # noqa: BLE001
+                self.last_error = "code@fill: " + type(exc).__name__ + ": " + str(exc)[:200]
+                filled = False
         if not filled:
             page.keyboard.insert_text(text)
-        page.wait_for_timeout(600)
-        stage("click")
-        clicked = False
-        for frame in frames:
-            try:
-                button = frame.get_by_role(
-                    "button",
-                    name=re.compile("Продолжить|Подтвердить|Войти|Далее|Отправить|Готово|Next|Continue"),
-                ).first
-                if button is not None and button.is_visible() and button.is_enabled():
-                    button.click()
-                    clicked = True
-                    break
-            except Exception:
-                continue
-        if not clicked:
+        page.wait_for_timeout(500)
+        self.code_stage = "submit"
+        submitted = False
+        for target in self._code_inputs(page):
+            for pattern in ("Продолжить", "Подтвердить", "Войти", "Далее", "Отправить", "Готово",
+                            "Continue", "Confirm", "Next", "Submit"):
+                try:
+                    button = target.get_by_role("button", name=re.compile(pattern)).first
+                    if button is not None and button.is_visible() and button.is_enabled():
+                        button.click(timeout=4000)
+                        submitted = True
+                        break
+                except Exception:
+                    continue
+            if submitted:
+                break
+        if not submitted:
             try:
                 page.keyboard.press("Enter")
             except Exception:
                 pass
-        stage("after-click")
-        # Only the cookie matters now: stop loading so the VK feed never grows.
-        page.wait_for_timeout(1200)
+        page.wait_for_timeout(1500)
+        self.code_stage = "wait-cookie"
         deadline = time.monotonic() + 15
         got_session = False
         while time.monotonic() < deadline:
@@ -412,21 +423,36 @@ class QRLoginBrowser:
             page.evaluate("() => window.stop()")
         except Exception:
             pass
-        stage("capture")
+        self.code_stage = "capture"
+        self.code_page_text = " | ".join(
+            part for part in (self._page_text(page), self._frame_text(page)) if part)[:600]
+        if not got_session:
+            self.last_error = "code@no-session: " + (self.code_page_text or "экран VK без текста")
         self.code_submitted = True
-        self.code_page_text = self._page_text(page)
-        self.last_error = self.last_error if got_session else ("code@no-session: " + self.code_page_text[:200])
         return self._capture(page)
 
     @staticmethod
     def _page_text(page):
-        text = ""
-        for target in [page] + [frame for frame in page.frames if frame is not page]:
+        """Visible text of the outer login page, compacted."""
+        try:
+            value = page.evaluate("() => (document.body && document.body.innerText) || ''")
+        except Exception:
+            value = ""
+        return " ".join((value or "").split())[:300]
+
+    @staticmethod
+    def _frame_text(page):
+        chunks = []
+        for frame in page.frames:
+            if frame is page:
+                continue
             try:
-                text += "\n" + (target.evaluate("() => (document.body && document.body.innerText) || ''") or "")
+                value = frame.evaluate("() => (document.body && document.body.innerText) || ''")
+                if value and value.strip():
+                    chunks.append(" ".join(value.split())[:200])
             except Exception:
                 continue
-        return " ".join(text.split())[:400]
+        return " | ".join(chunks)[:400]
 
     # --------------------------------------------------------------- commands
     def _release_slot(self):
