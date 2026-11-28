@@ -148,11 +148,7 @@ class QRLoginBrowser:
                         raise RuntimeError(
                             "Страница входа VK не отрисовала QR-код. Попробуй ещё раз через минуту."
                         )
-                    # Freeze the page: block navigation and heavy subresources so
-                    # the process stays tiny while the visitor confirms the login.
-                    page.route("**/*", lambda route: route.abort()
-                               if route.request.resource_type in ("document", "font", "media", "image", "stylesheet")
-                               else route.continue_())
+                    self.timings["qr_wait_s"] = round(time.monotonic() - phase, 1)
                     self.screenshot_data = self._capture(page)
                     self.page_info = self._page_info(page)
                     self.timings["total_s"] = round(time.monotonic() - started, 1)
