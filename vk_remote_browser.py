@@ -1,19 +1,25 @@
-"""Per-Pulsar-session headless VK browser with screenshot/input control.
+"""Per-Pulsar-session headless VK browser for QR-code login.
 
-The browser profile and cookies stay server-side and are never exposed to the
-client. This is a prototype: profiles live only as long as the Render instance.
+The QR-code login flow needs no password and no browser extension: the server
+opens a fresh Chromium profile on a VK login page that offers "scan the QR code
+with the VK app", returns a screenshot of that page, and waits for the user to
+confirm the login on their phone. Once VK sets the session cookies, the backend
+exchanges them for a VK web token and closes the browser.
+
+The browser profile and its cookies stay server-side and are never exposed to
+the client; they live only as long as this Pulsar session.
 """
 import base64
+import os
 import queue
 import threading
-import os
-from pathlib import Path
 
 # Render may omit service-level env vars from the Gunicorn runtime even when
-# they are present in render.yaml. Match the build command explicitly: the
-# browser was installed with PLAYWRIGHT_BROWSERS_PATH=0, so resolve it from
-# Playwright's package-local .local-browsers directory at runtime as well.
-os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+# they are present in render.yaml. Match the build command explicitly on Render:
+# the browser is installed with PLAYWRIGHT_BROWSERS_PATH=0 there, while local
+# development keeps Playwright's default browser cache.
+if os.environ.get("RENDER") and not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
 
 
 _BROWSER_SLOT = threading.BoundedSemaphore(1)
@@ -22,20 +28,26 @@ _BROWSER_SLOT = threading.BoundedSemaphore(1)
 class VKRemoteBrowser:
     WIDTH = 1280
     HEIGHT = 800
+    # A normal desktop UA: VK serves the QR login page to new devices, and the
+    # same string must be reused for the web-token exchange and VK Music calls.
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    )
 
     def __init__(self):
         if not _BROWSER_SLOT.acquire(blocking=False):
-            raise RuntimeError("На бесплатном сервере доступно одно окно авторизации VK одновременно. Попробуй позже.")
+            raise RuntimeError("На бесплатном сервере доступно одно окно входа VK одновременно. Попробуй позже.")
         self._slot_released = False
         self.commands = queue.Queue()
         self.ready = threading.Event()
         self.start_error = None
         self.closed = False
-        self.thread = threading.Thread(target=self._run, name="pulsar-vk-remote", daemon=True)
+        self.thread = threading.Thread(target=self._run, name="pulsar-vk-qr", daemon=True)
         self.thread.start()
-        if not self.ready.wait(75):
+        if not self.ready.wait(80):
             self._release_slot()
-            raise RuntimeError("Тайм-аут запуска удалённого браузера VK.")
+            raise RuntimeError("Тайм-аут запуска браузера VK.")
         if self.start_error:
             self._release_slot()
             raise RuntimeError(self.start_error)
@@ -44,10 +56,8 @@ class VKRemoteBrowser:
         try:
             from playwright.sync_api import sync_playwright
             with sync_playwright() as p:
-                # Explicit channel uses the full Chromium binary in headless mode,
-                # not Playwright's separate chromium_headless_shell executable.
-                executable = Path(p.chromium.executable_path)
-                if not executable.is_file():
+                executable = p.chromium.executable_path
+                if not os.path.isfile(executable):
                     raise RuntimeError(
                         "Chromium не установлен в runtime. Ожидаемый файл: "
                         + str(executable) + "; PLAYWRIGHT_BROWSERS_PATH="
@@ -57,23 +67,39 @@ class VKRemoteBrowser:
                     channel="chromium",
                     headless=True,
                     args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-                          "--no-zygote", "--disable-background-networking"],
+                          "--no-zygote", "--disable-background-networking",
+                          "--disable-extensions"],
                 )
                 context = browser.new_context(
                     viewport={"width": self.WIDTH, "height": self.HEIGHT},
                     device_scale_factor=1,
                     locale="ru-RU",
+                    user_agent=self.USER_AGENT,
+                )
+                # Fonts and media are not needed for the QR code and slow the
+                # page down on a small hosting instance.
+                context.route(
+                    "**/*",
+                    lambda route: route.abort()
+                    if route.request.resource_type in ("font", "media")
+                    else route.continue_(),
                 )
                 page = context.new_page()
-                page.goto("https://vk.ru/", wait_until="domcontentloaded", timeout=60000)
+                page.set_default_timeout(20000)
+                page.goto("https://vk.ru/", wait_until="domcontentloaded", timeout=90000)
+                page.wait_for_timeout(4000)
                 self.browser, self.context, self.page = browser, context, page
+                self._prepare_screenshot(page)
                 self.ready.set()
                 while True:
                     command, args, result_queue = self.commands.get()
                     try:
                         if command == "screenshot":
-                            data = page.screenshot(type="jpeg", quality=65, timeout=15000)
-                            result_queue.put(base64.b64encode(data).decode("ascii"))
+                            result_queue.put(self._capture(page))
+                        elif command == "refresh":
+                            page.goto("https://vk.ru/", wait_until="domcontentloaded", timeout=90000)
+                            page.wait_for_timeout(3000)
+                            result_queue.put(self._capture(page))
                         elif command == "click":
                             page.mouse.click(max(0, min(self.WIDTH, args["x"])),
                                              max(0, min(self.HEIGHT, args["y"])))
@@ -88,29 +114,54 @@ class VKRemoteBrowser:
                             page.mouse.wheel(0, max(-900, min(900, args["delta"])))
                             result_queue.put(True)
                         elif command == "cookies":
-                            result_queue.put(context.cookies(["https://vk.ru/", "https://login.vk.ru/"]))
+                            result_queue.put(context.cookies([
+                                "https://vk.ru/", "https://login.vk.ru/",
+                                "https://vk.com/", "https://login.vk.com/",
+                            ]))
                         elif command == "user_agent":
-                            result_queue.put(page.evaluate("() => navigator.userAgent"))
+                            result_queue.put(self.USER_AGENT)
                         elif command == "close":
                             context.close()
                             browser.close()
                             self.closed = True
                             result_queue.put(True)
                             break
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 - forwarded to the caller
                         result_queue.put(exc)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - startup failures surface via ready
             self.start_error = str(exc)[:300]
             self.ready.set()
+
+    @staticmethod
+    def _prepare_screenshot(page):
+        """Use the DevTools screenshot command so VK's font loading cannot stall it."""
+        try:
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture(page):
+        cdp = page.context.new_cdp_session(page)
+        try:
+            result = cdp.send("Page.captureScreenshot", {
+                "format": "jpeg", "quality": 72, "fromSurface": True,
+            })
+        finally:
+            try:
+                cdp.detach()
+            except Exception:
+                pass
+        return result["data"]
 
     def _release_slot(self):
         if not self._slot_released:
             self._slot_released = True
             _BROWSER_SLOT.release()
 
-    def _call(self, command, args=None, timeout=25):
+    def _call(self, command, args=None, timeout=30):
         if self.closed:
-            raise RuntimeError("Окно авторизации VK уже закрыто.")
+            raise RuntimeError("Окно входа VK уже закрыто.")
         result_queue = queue.Queue(maxsize=1)
         self.commands.put((command, args or {}, result_queue))
         result = result_queue.get(timeout=timeout)
@@ -119,7 +170,10 @@ class VKRemoteBrowser:
         return result
 
     def screenshot(self):
-        return self._call("screenshot", timeout=30)
+        return base64.b64decode(self._call("screenshot"))
+
+    def refresh(self):
+        return base64.b64decode(self._call("refresh", timeout=100))
 
     def click(self, x, y):
         return self._call("click", {"x": int(x), "y": int(y)})
@@ -141,12 +195,12 @@ class VKRemoteBrowser:
         return self._call("cookies")
 
     def user_agent(self):
-        return self._call("user_agent")
+        return self.USER_AGENT
 
     def close(self):
         if not self.closed:
             try:
-                self._call("close", timeout=15)
+                self._call("close", timeout=20)
             except Exception:
                 self.closed = True
             finally:

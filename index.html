@@ -10,23 +10,14 @@
     </div>
     <button id="vkConnectBtn" class="vk-connect-btn" type="button">ВОЙТИ ЧЕРЕЗ VK</button>
     <div id="vkConnectMessage" class="vk-connect-message" role="status" aria-live="polite"></div>
-    <button id="vkOpenVk" class="vk-secondary-btn" type="button" hidden>ОТКРЫТЬ VK.RU И ВОЙТИ</button>
     <button id="vkDisconnectBtn" class="vk-secondary-btn" type="button" hidden>ОТКЛЮЧИТЬ VK</button>
-    <div id="vkBridgeInstall" class="vk-bridge-install" hidden>
-      <p>Вход одним нажатием работает через маленькое расширение-мост. Оно читает только cookie авторизации vk.ru и передаёт их этой странице по HTTPS. Установка нужна один раз.</p>
-      <a id="vkBridgeDownload" class="vk-link-btn" href="/vk-bridge.zip" download>СКАЧАТЬ РАСШИРЕНИЕ (ZIP)</a>
-      <ol class="vk-bridge-steps">
-        <li>Распакуйте архив.</li>
-        <li>Откройте <code>chrome://extensions</code> и включите «Режим разработчика».</li>
-        <li>Нажмите «Загрузить распакованное расширение» и выберите папку <code>vk_bridge</code>.</li>
-        <li>Вернитесь на эту страницу и обновите её.</li>
-      </ol>
-      <button id="vkBridgeRecheck" class="vk-secondary-btn" type="button">ОБНОВИТЬ СТРАНИЦУ</button>
-      <p class="vk-hint">Chrome, Edge, Яндекс Браузер и другие Chromium-браузеры.</p>
-    </div>
     <details class="vk-fallback">
-      <summary>Войти без расширения (закладка)</summary>
-      <p>Перетащите кнопку <a id="vkBookmarklet" class="vk-bookmarklet" href="#">Pulsar → VK</a> на панель закладок (Ctrl+Shift+B). Затем откройте <a href="https://vk.ru/" target="_blank" rel="noreferrer">vk.ru</a>, войдите в аккаунт и нажмите закладку — Pulsar получит доступ к VK Музыке в текущем браузере.</p>
+      <summary>Как проходит вход</summary>
+      <p>Нажмите «Войти через VK» — откроется QR-код. Отсканируйте его камерой приложения ВКонтакте или VK Мессенджер и подтвердите вход на телефоне. Пароль на сайте не вводится, устанавливать ничего не нужно.</p>
+    </details>
+    <details class="vk-fallback">
+      <summary>Войти без телефона (закладка)</summary>
+      <p>Перетащите кнопку <a id="vkBookmarklet" class="vk-bookmarklet" href="#">Pulsar → VK</a> на панель закладок (Ctrl+Shift+B). Затем откройте <a href="https://vk.ru/" target="_blank" rel="noreferrer">vk.ru</a>, войдите в аккаунт и нажмите закладку — плеер получит доступ к VK Музыке.</p>
       <button id="vkBookmarkletCopy" class="vk-secondary-btn" type="button">СКОПИРОВАТЬ КОД ЗАКЛАДКИ</button>
       <div id="vkBookmarkletMessage" class="vk-connect-message" role="status" aria-live="polite"></div>
     </details>
@@ -43,7 +34,7 @@
       <div id="vkMusicMessage" role="status"></div>
     </details>
     <details class="vk-fallback">
-      <summary>Служебные проверки VK и удалённое окно</summary>
+      <summary>Служебные проверки</summary>
       <button id="vkBrowserLogin" type="button" hidden>ОТКРЫТЬ ОКНО VK (ЛОКАЛЬНЫЙ РЕЖИМ)</button>
       <button id="vkBrowserProbe" type="button">ПРОВЕРИТЬ ЛОКАЛЬНУЮ СЕССИЮ VK</button>
       <div id="vkBrowserMessage" role="status"></div>
@@ -51,7 +42,7 @@
       <div id="vkInspectAudioMessage" role="status" aria-live="polite"></div>
       <button id="vkBrowserCookieProbe" type="button">ПРОВЕРИТЬ АВТОРИЗАЦИЮ БРАУЗЕРА</button>
       <div id="vkBrowserCookieMessage" role="status" aria-live="polite"></div>
-      <button id="vkRemoteLogin" type="button">ВОЙТИ ЧЕРЕЗ УДАЛЁННОЕ ОКНО VK</button>
+      <button id="vkRemoteLogin" type="button">ОТКРЫТЬ ОКНО ВХОДА VK (QR)</button>
     </details>
   </div>
 </div></div></aside>
@@ -64,5 +55,4 @@
 <div class="volume-row"><span>VOLUME</span><input id="volume" type="range" min="0" max="1" step=".01" value=".8"><span id="volumeText">80%</span></div></div>
 <div class="right"><div class="queue-card"><div class="queue-tabs"><button id="queueTabQueue" class="queue-tab active">Очередь воспроизведения</button><button id="queueTabRecent" class="queue-tab">Недавно прослушанные</button></div><div class="section-title"><span id="queueHeading">Очередь воспроизведения</span> <span id="count">0 TRACKS</span></div><div id="queue" class="queue-empty">Твоя очередь пока пуста.</div></div></div></section>
 </main>
-<div id="vkRemoteModal" class="vk-remote-modal" hidden><div class="vk-remote-dialog" role="dialog" aria-modal="true" aria-labelledby="vkRemoteTitle"><div class="vk-remote-head"><div><h2 id="vkRemoteTitle">Авторизация VK</h2><p>Защищённое удалённое окно VK. Войди в аккаунт, затем нажми «Готово».</p></div><button id="vkRemoteClose" type="button" aria-label="Закрыть">×</button></div><div class="vk-remote-screen-wrap"><img id="vkRemoteScreen" alt="Удалённое окно авторизации VK" draggable="false"><div id="vkRemoteLoading">Запускаю Chromium…</div></div><div class="vk-remote-controls"><input id="vkRemoteText" type="password" autocomplete="off" placeholder="Ввод текста в выбранное поле VK"><button id="vkRemoteSend" type="button">ОТПРАВИТЬ ТЕКСТ</button><button id="vkRemoteEnter" type="button">ENTER</button><button id="vkRemoteScroll" type="button">ПРОКРУТИТЬ ↓</button><button id="vkRemoteFinish" type="button">ГОТОВО</button></div><div id="vkRemoteMessage" role="status">Нажимай на изображение, чтобы управлять страницей VK. Текст отправляется серверу только для ввода в браузер и не сохраняется.</div></div></div>
-<div id="authModal" class="auth-modal" hidden><div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="authModalTitle"><button id="closeAuthModal" class="auth-close" aria-label="Закрыть">×</button><h2 id="authModalTitle">Вход в Яндекс Музыку</h2><p id="authHelpModal">Нажми «Получить код», чтобы начать авторизацию.</p><button id="requestCodeModal" class="auth-start">Получить код</button><div id="authCodeWrapModal" class="auth-code-wrap-modal" hidden><div class="auth-code-label">ТВОЙ КОД АВТОРИЗАЦИИ</div><div class="auth-code-row"><strong id="authCodeModal">———</strong><button id="copyCodeModal" type="button">КОПИРОВАТЬ</button></div><div class="auth-split"><div class="auth-code-instructions"><strong>Твой код — слева.</strong><p>Яндекс откроется в отдельном небольшом окне. Введи туда код и подтверди вход. После успешной авторизации окно закроется автоматически.</p><a id="authLinkModal" href="https://ya.ru/device" target="_blank" rel="noreferrer">Если окно не открылось — нажми здесь ↗</a></div><div class="auth-frame-wrap auth-popup-note"><div class="auth-popup-icon">↗</div><strong>Страница авторизации Яндекса</strong><span>Откроется в отдельном окне браузера</span></div></div></div></div></div><audio id="audio" crossorigin="anonymous"></audio><script type="module" src="/engines.js?v=1.1.2"></script><script src="https://cdn.jsdelivr.net/npm/@vkid/sdk@2.6.1/dist-sdk/umd/index.js" onload="window.__vkSdkLoadEvent=true;console.info('VK ID SDK script load event fired:',this.src)" onerror="window.__vkSdkLoadError=true;console.error('VK ID SDK script failed to load:',this.src)"></script><script src="/app.js?v=1.3.0"></script></body></html>
+<div id="vkRemoteModal" class="vk-remote-modal" hidden><div class="vk-remote-dialog" role="dialog" aria-modal="true" aria-labelledby="vkRemoteTitle"><div class="vk-remote-head"><div><h2 id="vkRemoteTitle">Вход через VK</h2><p>Отсканируйте QR-код камерой приложения ВКонтакте или VK Мессенджер и подтвердите вход на телефоне. Пароль вводить не нужно.</p></div><button id="vkRemoteClose" type="button" aria-label="Закрыть">×</button></div><div class="vk-remote-screen-wrap"><img id="vkRemoteScreen" alt="QR-код для входа в VK" draggable="false"><div id="vkRemoteLoading">Запускаю окно входа VK…</div></div><div class="vk-remote-controls"><button id="vkRemoteRefreshQr" type="button">ОБНОВИТЬ QR</button><button id="vkRemoteCancel" type="button">ОТМЕНА</button></div><div id="vkRemoteMessage" role="status">Ожидаю подтверждение входа в приложении VK…</div></div></div><div id="authModal" class="auth-modal" hidden><div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="authModalTitle"><button id="closeAuthModal" class="auth-close" aria-label="Закрыть">×</button><h2 id="authModalTitle">Вход в Яндекс Музыку</h2><p id="authHelpModal">Нажми «Получить код», чтобы начать авторизацию.</p><button id="requestCodeModal" class="auth-start">Получить код</button><div id="authCodeWrapModal" class="auth-code-wrap-modal" hidden><div class="auth-code-label">ТВОЙ КОД АВТОРИЗАЦИИ</div><div class="auth-code-row"><strong id="authCodeModal">———</strong><button id="copyCodeModal" type="button">КОПИРОВАТЬ</button></div><div class="auth-split"><div class="auth-code-instructions"><strong>Твой код — слева.</strong><p>Яндекс откроется в отдельном небольшом окне. Введи туда код и подтверди вход. После успешной авторизации окно закроется автоматически.</p><a id="authLinkModal" href="https://ya.ru/device" target="_blank" rel="noreferrer">Если окно не открылось — нажми здесь ↗</a></div><div class="auth-frame-wrap auth-popup-note"><div class="auth-popup-icon">↗</div><strong>Страница авторизации Яндекса</strong><span>Откроется в отдельном окне браузера</span></div></div></div></div></div><audio id="audio" crossorigin="anonymous"></audio><script type="module" src="/engines.js?v=1.1.2"></script><script src="https://cdn.jsdelivr.net/npm/@vkid/sdk@2.6.1/dist-sdk/umd/index.js" onload="window.__vkSdkLoadEvent=true;console.info('VK ID SDK script load event fired:',this.src)" onerror="window.__vkSdkLoadError=true;console.error('VK ID SDK script failed to load:',this.src)"></script><script src="/app.js?v=1.3.0"></script></body></html>

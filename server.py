@@ -552,12 +552,30 @@ def api_vk_remote_start():
             pass
     try:
         from vk_remote_browser import VKRemoteBrowser
+        import base64
         browser = VKRemoteBrowser()
         with s["lock"]:
             s["vk_remote_browser"] = browser
-        return jsonify({"ok": True, "width": browser.WIDTH, "height": browser.HEIGHT})
+        image = base64.b64encode(browser.screenshot()).decode("ascii")
+        return jsonify({"ok": True, "image": image, "width": browser.WIDTH, "height": browser.HEIGHT})
     except Exception as exc:
-        return api_error("Не удалось запустить удалённый Chromium: " + str(exc)[:220], 503)
+        return api_error("Не удалось запустить окно входа VK: " + str(exc)[:220], 503)
+
+
+@app.post("/api/vk/remote/refresh")
+def api_vk_remote_refresh():
+    """Reload the QR login page and return a fresh screenshot."""
+    s = state()
+    with s["lock"]:
+        browser = s.get("vk_remote_browser")
+    if not browser:
+        return api_error("Окно входа VK не запущено.", 404)
+    try:
+        import base64
+        image = base64.b64encode(browser.refresh()).decode("ascii")
+        return jsonify({"ok": True, "image": image, "width": browser.WIDTH, "height": browser.HEIGHT})
+    except Exception as exc:
+        return api_error("Не удалось обновить QR-код VK: " + str(exc)[:180], 502)
 
 
 @app.post("/api/vk/remote/screen")
@@ -568,7 +586,8 @@ def api_vk_remote_screen():
     if not browser:
         return api_error("Сначала запусти окно авторизации VK.", 404)
     try:
-        return jsonify({"ok": True, "image": browser.screenshot(), "width": browser.WIDTH, "height": browser.HEIGHT})
+        return jsonify({"ok": True, "image": __import__("base64").b64encode(browser.screenshot()).decode("ascii"),
+                        "width": browser.WIDTH, "height": browser.HEIGHT})
     except Exception as exc:
         return api_error("Не удалось получить изображение VK: " + str(exc)[:180], 502)
 
@@ -606,54 +625,59 @@ def api_vk_remote_input():
 
 @app.post("/api/vk/remote/finish")
 def api_vk_remote_finish():
+    """Poll the QR login: as soon as VK sets the session cookies, connect VK Music."""
     s = state()
     with s["lock"]:
         browser = s.get("vk_remote_browser")
     if not browser:
-        return api_error("Окно авторизации VK не запущено.", 404)
+        return api_error("Окно входа VK не запущено.", 404)
     if VKMusicService is None:
         return api_error("VKpyMusic не установлена на сервере.", 503)
-    keep_open = False
     try:
         cookies = browser.cookies()
-        remixsid = next((x.get("value", "") for x in cookies
-                         if x.get("name") == "remixsid" and "vk.ru" in x.get("domain", "")), "")
-        cookie_p = next((x.get("value", "") for x in cookies
-                         if x.get("name") == "p" and "login.vk.ru" in x.get("domain", "")), "")
-        if not remixsid:
-            keep_open = True
-            return api_error("Авторизация пока не обнаружена. Заверши вход в VK и повтори проверку.", 401)
-        token_data = _request_vk_web_token(remixsid, cookie_p, browser.user_agent())
-        token = str(token_data.get("access_token") or "")
-        user_id = token_data.get("user_id")
-        if not token or not user_id:
-            return api_error("VK не вернул web-токен или ID пользователя.", 502)
-        service = VKMusicService(browser.user_agent(), token)
-        with s["lock"]:
-            s.update(vk_service=service, vk_user_id=int(user_id),
-                     vk_remixsid=remixsid, vk_cookie_p=cookie_p,
-                     vk_user_agent=browser.user_agent(),
-                     vk_token_expires=int(token_data.get("expires") or 0),
-                     vk_auth_error="")
-        try:
-            service.search_songs_by_text("Daft Punk", count=1, offset=0)
-            audio_search = True
-        except Exception:
-            audio_search = False
-        return jsonify({"ok": True, "connected": True, "user_id": int(user_id),
-                        "audio_search": audio_search,
-                        "message": "Сессия VK подключена. Токен хранится только на сервере."})
     except Exception as exc:
-        keep_open = True
-        return api_error("Не удалось завершить авторизацию VK: " + str(exc)[:220], 502)
-    finally:
-        if not keep_open:
-            with s["lock"]:
-                s["vk_remote_browser"] = None
-            try:
-                browser.close()
-            except Exception:
-                pass
+        return api_error("Не удалось прочитать сессию VK: " + str(exc)[:160], 502)
+    remixsid = ""
+    cookie_p = ""
+    domain = "vk.ru"
+    for cookie in cookies:
+        if not isinstance(cookie, dict):
+            continue
+        name = str(cookie.get("name") or "")
+        value = str(cookie.get("value") or "")
+        cookie_domain = str(cookie.get("domain") or "")
+        if not value or name not in ("remixsid", "p"):
+            continue
+        if cookie_domain.endswith("vk.ru"):
+            if name == "remixsid" and not remixsid:
+                remixsid = value
+                domain = "vk.ru"
+            elif name == "p" and not cookie_p:
+                cookie_p = value
+        elif cookie_domain.endswith("vk.com") and not remixsid:
+            if name == "remixsid":
+                domain = "vk.com"
+    if not remixsid:
+        return api_error("QR-код ещё не подтверждён в приложении VK.", 401)
+    user_agent = browser.user_agent()
+    try:
+        connection = _vk_cookie_connection(remixsid, cookie_p, user_agent, domain)
+        _vk_store_connection(
+            s, connection["service"], connection["user_id"], connection["user_name"],
+            remixsid=remixsid, cookie_p=cookie_p, user_agent=user_agent,
+            cookie_domain=domain, expires=connection["expires"],
+        )
+    except Exception as exc:
+        return api_error("VK принял вход, но подключить музыку не удалось: " + str(exc)[:200], 502)
+    with s["lock"]:
+        s["vk_remote_browser"] = None
+    try:
+        browser.close()
+    except Exception:
+        pass
+    snapshot = _vk_session_snapshot(s)
+    snapshot.update(ok=True, connected=True, message="VK Музыка подключена.")
+    return jsonify(snapshot)
 
 
 @app.post("/api/vk/remote/close")
@@ -686,27 +710,6 @@ def static_files(filename):
     if filename.startswith("cache/") or filename.startswith("api/") or filename.startswith("."):
         abort(404)
     return send_from_directory(ROOT, filename)
-
-
-@app.get("/vk-bridge.zip")
-def download_vk_bridge():
-    """Download the optional browser extension that passes the VK session to Pulsar."""
-    import io
-    import zipfile
-
-    folder = ROOT / "vk_bridge"
-    if not (folder / "manifest.json").is_file():
-        abort(404)
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(folder.rglob("*")):
-            if path.is_file():
-                archive.write(path, path.relative_to(ROOT).as_posix())
-    response = make_response(buffer.getvalue())
-    response.headers["Content-Type"] = "application/zip"
-    response.headers["Content-Disposition"] = 'attachment; filename="pulsar-vk-bridge.zip"'
-    response.headers["Cache-Control"] = "no-store"
-    return response
 
 
 @app.get("/api/status")

@@ -296,60 +296,112 @@ $('vkInspectAudio').onclick=async()=>{
 };
 
 
-/* Hosted VK remote-browser login prototype */
-let vkRemoteTimer=null,vkRemoteBusy=false,vkRemoteStarted=false;
-const vkRemoteModal=$('vkRemoteModal'),vkRemoteScreen=$('vkRemoteScreen'),vkRemoteLoading=$('vkRemoteLoading'),vkRemoteMessage=$('vkRemoteMessage');
-async function vkRemoteRequest(path,body={}){
- const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin',cache:'no-store'});
- const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||'Ошибка удалённого браузера');return data;
+/* Вход в VK по QR-коду через серверный Chromium: без расширений и паролей. */
+let vkQrStarted = false, vkQrPollTimer = null, vkQrBusy = false;
+const vkQrModal = document.getElementById('vkRemoteModal');
+const vkQrScreen = document.getElementById('vkRemoteScreen');
+const vkQrLoading = document.getElementById('vkRemoteLoading');
+const vkQrMessage = document.getElementById('vkRemoteMessage');
+
+async function vkQrRequest(path, body) {
+ const response = await fetch(path, { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+  headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+ let data = null;
+ try { data = await response.json(); } catch (_) { data = null; }
+ if (!response.ok || !data || data.ok === false) throw new Error((data && data.error) || ('HTTP ' + response.status));
+ return data;
 }
-async function vkRemoteRefresh(){
- if(vkRemoteBusy||vkRemoteModal.hidden)return;vkRemoteBusy=true;
- try{const data=await vkRemoteRequest('/api/vk/remote/screen');vkRemoteScreen.src='data:image/jpeg;base64,'+data.image;vkRemoteLoading.hidden=true}
- catch(error){vkRemoteMessage.textContent=error.message;vkRemoteMessage.dataset.state='error'}
- finally{vkRemoteBusy=false}
+
+function vkQrStopPolling() {
+ if (vkQrPollTimer) clearInterval(vkQrPollTimer);
+ vkQrPollTimer = null;
 }
-async function vkRemoteStart(){
- const button=$('vkRemoteLogin');button.disabled=true;vkRemoteMessage.textContent='Запускаю удалённый Chromium…';vkRemoteModal.hidden=false;vkRemoteLoading.hidden=false;
- try{
-  await vkRemoteRequest('/api/vk/remote/start');
-  vkRemoteStarted=true;vkRemoteScreen.style.pointerEvents='auto';
-  await vkRemoteRefresh();vkRemoteTimer=setInterval(vkRemoteRefresh,1200);
-  vkRemoteMessage.textContent='Нажимай на изображение, чтобы управлять страницей VK. После входа нажми «ГОТОВО».';
- }catch(error){vkRemoteStarted=false;if(vkRemoteTimer)clearInterval(vkRemoteTimer);vkRemoteTimer=null;vkRemoteScreen.style.pointerEvents='none';vkRemoteMessage.textContent=error.message;vkRemoteMessage.dataset.state='error';vkRemoteLoading.textContent='Не удалось запустить браузер'}
- finally{button.disabled=false}
+
+function vkQrCloseModal() {
+ vkQrStarted = false;
+ vkQrStopPolling();
+ if (vkQrModal) vkQrModal.hidden = true;
+ if (vkQrScreen) vkQrScreen.removeAttribute('src');
 }
-async function vkRemoteInput(action,extra={}){
- if(!vkRemoteStarted)return;
- try{await vkRemoteRequest('/api/vk/remote/input',{action,...extra});setTimeout(vkRemoteRefresh,250)}
- catch(error){vkRemoteMessage.textContent=error.message;vkRemoteMessage.dataset.state='error'}
+
+async function vkQrCancel() {
+ vkQrCloseModal();
+ try { await vkQrRequest('/api/vk/remote/close', {}); } catch (_) {}
 }
-$('vkRemoteLogin').onclick=vkRemoteStart;
-vkRemoteScreen.addEventListener('click',event=>{
- const rect=vkRemoteScreen.getBoundingClientRect();const x=(event.clientX-rect.left)/rect.width*1280,y=(event.clientY-rect.top)/rect.height*800;
- vkRemoteInput('click',{x:Math.round(x),y:Math.round(y)});
-});
-$('vkRemoteSend').onclick=async()=>{
- const field=$('vkRemoteText'),value=field.value;if(!value)return;
- await vkRemoteInput('type',{text:value});field.value='';
-};
-$('vkRemoteEnter').onclick=()=>vkRemoteInput('press',{key:'Enter'});
-$('vkRemoteScroll').onclick=()=>vkRemoteInput('scroll',{delta:650});
-$('vkRemoteClose').onclick=async()=>{
- vkRemoteStarted=false;if(vkRemoteTimer)clearInterval(vkRemoteTimer);vkRemoteTimer=null;vkRemoteModal.hidden=true;vkRemoteScreen.removeAttribute('src');
- try{await vkRemoteRequest('/api/vk/remote/close')}catch(_){}
-};
-$('vkRemoteFinish').onclick=async()=>{
- const button=$('vkRemoteFinish');button.disabled=true;vkRemoteMessage.textContent='Проверяю авторизацию и подключаю VK Music…';
- try{
-  const result=await vkRemoteRequest('/api/vk/remote/finish');
-  $('vkAuthStatus').textContent='VK Music: подключена · ID '+result.user_id;$('vkAuthStatus').dataset.state='connected';
-  $('vkMusicSettings').textContent='✓　VK Music подключена';
-  vkRemoteMessage.textContent=result.message+(result.audio_search?' Поиск аудио отвечает.':' Токен получен, но тест поиска аудио не прошёл.');
-  vkRemoteStarted=false;if(vkRemoteTimer)clearInterval(vkRemoteTimer);vkRemoteTimer=null;setTimeout(()=>{vkRemoteModal.hidden=true;vkRemoteScreen.removeAttribute('src')},1600);
- }catch(error){vkRemoteMessage.textContent=error.message;vkRemoteMessage.dataset.state='error'}
- finally{button.disabled=false}
-};
+
+async function vkQrPoll() {
+ if (!vkQrStarted || vkQrBusy) return;
+ vkQrBusy = true;
+ try {
+  const result = await vkQrRequest('/api/vk/remote/finish', {});
+  vkQrStopPolling();
+  vkQrStarted = false;
+  vkQrMessage.textContent = 'VK подключён. Загружаю музыку…';
+  vkQrMessage.dataset.state = 'connected';
+  if (typeof window.__pulsarVkConnected === 'function') window.__pulsarVkConnected(result);
+  setTimeout(vkQrCloseModal, 1400);
+ } catch (error) {
+  const text = String((error && error.message) || '');
+  if (/ещё не подтверждён|QR/i.test(text)) {
+   vkQrMessage.textContent = 'Ожидаю подтверждение входа на телефоне…';
+   vkQrMessage.dataset.state = '';
+  } else {
+   vkQrMessage.textContent = text;
+   vkQrMessage.dataset.state = 'error';
+  }
+ } finally { vkQrBusy = false; }
+}
+
+async function vkQrStart() {
+ if (vkQrStarted) { vkQrModal.hidden = false; return; }
+ const button = document.getElementById('vkConnectBtn');
+ if (button) button.disabled = true;
+ vkQrModal.hidden = false;
+ vkQrScreen.removeAttribute('src');
+ vkQrLoading.hidden = false;
+ vkQrLoading.textContent = 'Запускаю окно входа VK… Это может занять до минуты.';
+ vkQrMessage.textContent = 'Откройте приложение ВКонтакте или VK Мессенджер на телефоне, отсканируйте QR-код и подтвердите вход.';
+ vkQrMessage.dataset.state = '';
+ try {
+  const data = await vkQrRequest('/api/vk/remote/start', {});
+  vkQrScreen.src = 'data:image/jpeg;base64,' + data.image;
+  vkQrLoading.hidden = true;
+  vkQrStarted = true;
+  vkQrStopPolling();
+  vkQrPollTimer = setInterval(vkQrPoll, 2500);
+  vkQrPoll();
+ } catch (error) {
+  vkQrLoading.textContent = 'Не удалось открыть окно входа VK';
+  vkQrMessage.textContent = String((error && error.message) || 'Неизвестная ошибка');
+  vkQrMessage.dataset.state = 'error';
+ } finally {
+  if (button) button.disabled = false;
+ }
+}
+
+async function vkQrRefresh() {
+ if (!vkQrStarted || vkQrBusy) return;
+ vkQrBusy = true;
+ try {
+  const data = await vkQrRequest('/api/vk/remote/refresh', {});
+  vkQrScreen.src = 'data:image/jpeg;base64,' + data.image;
+  vkQrMessage.textContent = 'QR-код обновлён. Отсканируйте его приложением ВКонтакте.';
+  vkQrMessage.dataset.state = '';
+ } catch (error) {
+  vkQrMessage.textContent = String((error && error.message) || '');
+  vkQrMessage.dataset.state = 'error';
+ } finally { vkQrBusy = false; }
+}
+
+const vkRemoteLoginBtn = document.getElementById('vkRemoteLogin');
+if (vkRemoteLoginBtn) vkRemoteLoginBtn.addEventListener('click', vkQrStart);
+const vkQrRefreshBtn = document.getElementById('vkRemoteRefreshQr');
+if (vkQrRefreshBtn) vkQrRefreshBtn.addEventListener('click', vkQrRefresh);
+const vkQrCancelBtn = document.getElementById('vkRemoteCancel');
+if (vkQrCancelBtn) vkQrCancelBtn.addEventListener('click', vkQrCancel);
+const vkQrCloseBtn = document.getElementById('vkRemoteClose');
+if (vkQrCloseBtn) vkQrCloseBtn.addEventListener('click', vkQrCancel);
+
 
 $('vkBrowserCookieProbe').onclick=async()=>{
  const button=$('vkBrowserCookieProbe'),output=$('vkBrowserCookieMessage');
@@ -516,238 +568,138 @@ $('vkMusicConnect').onclick=async()=>{
 })();
 
 
-/* VK Музыка: вход через профиль VK (расширение-мост или закладка). */
+
+/* VK Музыка: карточка подключения, закладка и QR-вход. */
 (function initVkSession() {
-  const byId = function (id) { return document.getElementById(id); };
-  const panel = byId('vkMusicPanel');
-  if (!panel) return;
-  const statusEl = byId('vkSessionStatus');
-  const connectBtn = byId('vkConnectBtn');
-  const messageEl = byId('vkConnectMessage');
-  const installEl = byId('vkBridgeInstall');
-  const disconnectBtn = byId('vkDisconnectBtn');
-  const openVkBtn = byId('vkOpenVk');
-  const loginBtn = byId('vkLoginBtn');
-  let busy = false;
+ const byId = function (id) { return document.getElementById(id); };
+ const panel = byId('vkMusicPanel');
+ if (!panel) return;
+ const statusEl = byId('vkSessionStatus');
+ const connectBtn = byId('vkConnectBtn');
+ const messageEl = byId('vkConnectMessage');
+ const disconnectBtn = byId('vkDisconnectBtn');
+ let busy = false;
 
-  function setMessage(text, state) {
-    messageEl.textContent = text || '';
-    messageEl.dataset.state = state || '';
+ function setMessage(text, state) {
+  messageEl.textContent = text || '';
+  messageEl.dataset.state = state || '';
+ }
+
+ function renderStatus(snapshot) {
+  const connected = !!(snapshot && snapshot.connected);
+  const sidebarStatus = byId('vkAuthStatus');
+  const settingsBtn = byId('vkMusicSettings');
+  if (connected) {
+   const name = snapshot.user_name || 'VK';
+   statusEl.textContent = name;
+   statusEl.dataset.state = 'connected';
+   connectBtn.textContent = 'ПОДКЛЮЧЕНО';
+   connectBtn.disabled = true;
+   disconnectBtn.hidden = false;
+   if (sidebarStatus) { sidebarStatus.textContent = 'VK Музыка: ' + name; sidebarStatus.dataset.state = 'connected'; }
+   if (settingsBtn) settingsBtn.textContent = '✓　VK Музыка подключена';
+  } else {
+   statusEl.textContent = 'не подключена';
+   statusEl.dataset.state = 'off';
+   connectBtn.textContent = 'ВОЙТИ ЧЕРЕЗ VK';
+   connectBtn.disabled = false;
+   disconnectBtn.hidden = true;
+   if (sidebarStatus) { sidebarStatus.textContent = 'VK Музыка: не подключена'; sidebarStatus.dataset.state = ''; }
+   if (settingsBtn) settingsBtn.textContent = '♫　Настроить VK Музыку';
   }
+ }
 
-  function renderStatus(snapshot) {
-    const connected = !!(snapshot && snapshot.connected);
-    const sidebarStatus = byId('vkAuthStatus');
-    const settingsBtn = byId('vkMusicSettings');
-    if (connected) {
-      const name = snapshot.user_name || 'VK';
-      statusEl.textContent = name;
-      statusEl.dataset.state = 'connected';
-      connectBtn.textContent = 'ПОДКЛЮЧЕНО';
-      connectBtn.disabled = true;
-      disconnectBtn.hidden = false;
-      installEl.hidden = true;
-      if (openVkBtn) openVkBtn.hidden = true;
-      if (sidebarStatus) {
-        sidebarStatus.textContent = 'VK Музыка: ' + name;
-        sidebarStatus.dataset.state = 'connected';
-      }
-      if (settingsBtn) settingsBtn.textContent = '✓　VK Музыка подключена';
-    } else {
-      statusEl.textContent = 'не подключена';
-      statusEl.dataset.state = 'off';
-      connectBtn.textContent = 'ВОЙТИ ЧЕРЕЗ VK';
-      connectBtn.disabled = false;
-      disconnectBtn.hidden = true;
-      if (sidebarStatus) {
-        sidebarStatus.textContent = 'VK Музыка: не подключена';
-        sidebarStatus.dataset.state = '';
-      }
-      if (settingsBtn) settingsBtn.textContent = '♫　Настроить VK Музыку';
-    }
-  }
-
-  function bridgeAvailable() {
-    return document.documentElement.dataset.pulsarVkBridge === '1';
-  }
-
-  function requestBridgeCookies(timeout) {
-    return new Promise(function (resolve, reject) {
-      const id = Math.random().toString(36).slice(2);
-      let done = false;
-      const timer = setTimeout(function () {
-        finish(new Error('bridge-timeout'));
-      }, timeout || 4000);
-      function finish(error, payload) {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        window.removeEventListener('message', onMessage);
-        if (error) reject(error); else resolve(payload || {});
-      }
-      function onMessage(event) {
-        if (event.source !== window || event.origin !== location.origin) return;
-        const data = event.data;
-        if (!data || data.source !== 'pulsar-vk-bridge' || data.id !== id) return;
-        if (data.error) finish(new Error(data.error)); else finish(null, data.payload);
-      }
-      window.addEventListener('message', onMessage);
-      window.postMessage({ source: 'pulsar-vk-request', id: id, type: 'cookies', userAgent: navigator.userAgent }, location.origin);
+ function postJson(path, body) {
+  return fetch(path, { method: 'POST', cache: 'no-store', credentials: 'same-origin',
+   headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
+   .then(function (response) {
+    return response.json().catch(function () { return null; }).then(function (data) {
+     if (!response.ok || !data || data.error) throw new Error((data && data.error) || ('HTTP ' + response.status));
+     return data;
     });
-  }
+   });
+ }
 
-  function postJson(path, body) {
-    return fetch(path, {
-      method: 'POST', cache: 'no-store', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {})
-    }).then(function (response) {
-      return response.json().catch(function () { return null; }).then(function (data) {
-        if (!response.ok || !data || data.error) {
-          throw new Error((data && data.error) || ('HTTP ' + response.status));
-        }
-        return data;
-      });
-    });
-  }
+ function connectWithPayload(body) {
+  return postJson('/api/vk/session/connect', body).then(function (snapshot) {
+   window.__pulsarVkConnected(snapshot);
+   return snapshot;
+  });
+ }
 
-  async function connectWithPayload(body) {
-    const snapshot = await postJson('/api/vk/session/connect', body);
+ window.__pulsarVkConnected = function (snapshot) {
+  renderStatus(Object.assign({ connected: true }, snapshot || {}));
+  setMessage('VK Музыка подключена. Выберите «VK» в поле поиска.', 'connected');
+  const source = byId('searchSource');
+  if (source) source.value = 'vk';
+ };
+
+ function refreshStatus() {
+  return fetch('/api/vk/session/status', { cache: 'no-store', credentials: 'same-origin' })
+   .then(function (response) { return response.json(); })
+   .then(function (snapshot) {
     renderStatus(snapshot);
-    setMessage('VK Музыка подключена. Поиск VK доступен в поле поиска.', 'connected');
-    const source = byId('searchSource');
-    if (source) source.value = 'vk';
+    if (snapshot.connected && snapshot.refreshable && snapshot.expires_in_seconds != null && snapshot.expires_in_seconds < 300) {
+     postJson('/api/vk/session/refresh', {}).then(renderStatus).catch(function () {});
+    }
     return snapshot;
-  }
+   })
+   .catch(function () {});
+ }
 
-  async function connect(options) {
-    if (busy) return;
-    const silent = !!(options && options.silent);
-    busy = true;
-    connectBtn.disabled = true;
-    try {
-      if (!bridgeAvailable()) {
-        if (silent) return;
-        installEl.hidden = false;
-        const firefox = /Firefox\//.test(navigator.userAgent);
-        setMessage(firefox
-          ? 'В Firefox расширение-мост не поддерживается: используйте вход через закладку в разделе ниже.'
-          : 'Чтобы входить одним нажатием, один раз установите расширение ниже, затем обновите страницу. Без установки есть вход через закладку.', '');
-        if (firefox) {
-          const fallback = panel.querySelector('details.vk-fallback');
-          if (fallback) fallback.open = true;
-        }
-        return;
-      }
-      if (!silent) setMessage('Читаю сессию VK из браузера…', 'checking');
-      const cookies = await requestBridgeCookies();
-      if (!cookies.remixsid && !cookies.remixsidVkCom) {
-        installEl.hidden = true;
-        if (openVkBtn) openVkBtn.hidden = false;
-        setMessage('В браузере нет активной сессии VK. Нажмите «Открыть vk.ru», войдите в аккаунт и вернитесь на эту страницу.', 'error');
-        return;
-      }
-      if (!silent) setMessage('Подключаю VK Музыку…', 'checking');
-      await connectWithPayload({
-        remixsid: cookies.remixsid || '',
-        p: cookies.p || '',
-        remixsidVkCom: cookies.remixsidVkCom || '',
-        pVkCom: cookies.pVkCom || '',
-        user_agent: cookies.userAgent || navigator.userAgent
-      });
-    } catch (error) {
-      const text = error && error.message === 'bridge-timeout'
-        ? 'Расширение не ответило. Обновите страницу и попробуйте снова.'
-        : ('Не удалось войти через VK: ' + ((error && error.message) || 'неизвестная ошибка'));
-      setMessage(text, 'error');
-    } finally {
-      busy = false;
-      connectBtn.disabled = false;
+ function buildBookmarklet() {
+  const site = location.origin;
+  return "javascript:(function(){var go=function(t){location.href='" + site + "/#vk_token='+encodeURIComponent(t)};fetch('https://login.vk.ru/?act=web_token',{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'version=1&app_id=6287487'}).then(function(r){return r.json()}).then(function(d){if(!d||d.type!=='okay'||!d.data||!d.data.access_token){alert('Pulsar: сначала войдите на vk.ru');return}go(d.data.access_token)}).catch(function(e){alert('Pulsar: ошибка VK '+(e&&e.message||''))})})()";
+ }
+
+ function connectFromHash() {
+  const match = /(?:^#|&)vk_token=([^&]+)/.exec(location.hash || '');
+  if (!match) return;
+  const token = decodeURIComponent(match[1]);
+  history.replaceState({}, document.title, location.pathname + location.search);
+  setMessage('Проверяю VK токен…', 'checking');
+  connectWithPayload({ access_token: token, user_agent: navigator.userAgent }).catch(function (error) {
+   setMessage('Не удалось использовать VK токен: ' + ((error && error.message) || ''), 'error');
+  });
+ }
+
+ connectBtn.addEventListener('click', function () {
+  panel.hidden = false;
+  setMessage('Открываю окно входа через VK…', 'checking');
+  vkQrStart();
+ });
+ disconnectBtn.addEventListener('click', function () {
+  postJson('/api/vk/disconnect', {})
+   .then(function () { renderStatus({ connected: false }); setMessage('VK Музыка отключена.', ''); })
+   .catch(function (error) { setMessage('Не удалось отключить VK: ' + ((error && error.message) || ''), 'error'); });
+ });
+ const loginBtn = byId('vkLoginBtn');
+ if (loginBtn) {
+  loginBtn.textContent = 'Ⓥ　Войти через VK';
+  loginBtn.addEventListener('click', function () {
+   panel.hidden = false;
+   refreshStatus().then(function (snapshot) {
+    if (!snapshot || !snapshot.connected) {
+     setMessage('Открываю окно входа через VK…', 'checking');
+     vkQrStart();
     }
-  }
-
-  async function connectFromHash() {
-    const match = /(?:^#|&)vk_token=([^&]+)/.exec(location.hash || '');
-    if (!match) return false;
-    const token = decodeURIComponent(match[1]);
-    history.replaceState({}, document.title, location.pathname + location.search);
-    try {
-      setMessage('Проверяю VK токен…', 'checking');
-      await connectWithPayload({ access_token: token, user_agent: navigator.userAgent });
-    } catch (error) {
-      setMessage('Не удалось использовать VK токен: ' + ((error && error.message) || ''), 'error');
-    }
-    return true;
-  }
-
-  function refreshStatus() {
-    return fetch('/api/vk/session/status', { cache: 'no-store', credentials: 'same-origin' })
-      .then(function (response) { return response.json(); })
-      .then(function (snapshot) {
-        renderStatus(snapshot);
-        if (snapshot.connected && snapshot.refreshable && snapshot.expires_in_seconds != null && snapshot.expires_in_seconds < 300) {
-          postJson('/api/vk/session/refresh', {}).then(renderStatus).catch(function () {});
-        }
-        return snapshot;
-      })
-      .catch(function () {});
-  }
-
-  function buildBookmarklet() {
-    const site = location.origin;
-    return "javascript:(function(){var go=function(t){location.href='" + site + "/#vk_token='+encodeURIComponent(t)};fetch('https://login.vk.ru/?act=web_token',{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'version=1&app_id=6287487'}).then(function(r){return r.json()}).then(function(d){if(!d||d.type!=='okay'||!d.data||!d.data.access_token){alert('Pulsar: сначала войдите на vk.ru');return}go(d.data.access_token)}).catch(function(e){alert('Pulsar: ошибка VK '+(e&&e.message||''))})})()";
-  }
-
-  connectBtn.addEventListener('click', connect);
-  disconnectBtn.addEventListener('click', function () {
-    postJson('/api/vk/disconnect', {})
-      .then(function () { renderStatus({ connected: false }); setMessage('VK Музыка отключена.', ''); })
-      .catch(function (error) { setMessage('Не удалось отключить VK: ' + ((error && error.message) || ''), 'error'); });
+   });
   });
-  const recheck = byId('vkBridgeRecheck');
-  if (recheck) recheck.addEventListener('click', function () { location.reload(); });
-  if (openVkBtn) openVkBtn.addEventListener('click', function () {
-    window.open('https://vk.ru/', '_blank', 'noopener');
+ }
+ const bookmarklet = byId('vkBookmarklet');
+ if (bookmarklet) bookmarklet.setAttribute('href', buildBookmarklet());
+ const bookmarkletCopy = byId('vkBookmarkletCopy');
+ if (bookmarkletCopy) bookmarkletCopy.addEventListener('click', function () {
+  const output = byId('vkBookmarkletMessage');
+  navigator.clipboard.writeText(buildBookmarklet()).then(function () {
+   output.textContent = 'Код скопирован. Создайте закладку вручную и вставьте его как адрес.';
+   output.dataset.state = 'connected';
+  }).catch(function (error) {
+   output.textContent = 'Не удалось скопировать: ' + ((error && error.message) || '');
+   output.dataset.state = 'error';
   });
-  if (loginBtn) {
-    // The sidebar entry starts the same connection flow as the panel button.
-    loginBtn.textContent = 'Ⓥ　Войти через VK';
-    loginBtn.onclick = function () {
-      panel.hidden = false;
-      refreshStatus();
-      connect();
-    };
-  }
-  const bookmarklet = byId('vkBookmarklet');
-  if (bookmarklet) bookmarklet.setAttribute('href', buildBookmarklet());
-  const bookmarkletCopy = byId('vkBookmarkletCopy');
-  if (bookmarkletCopy) bookmarkletCopy.addEventListener('click', function () {
-    const output = byId('vkBookmarkletMessage');
-    navigator.clipboard.writeText(buildBookmarklet()).then(function () {
-      output.textContent = 'Код скопирован. Создайте закладку вручную и вставьте его в поле адреса.';
-      output.dataset.state = 'connected';
-    }).catch(function (error) {
-      output.textContent = 'Не удалось скопировать: ' + ((error && error.message) || '');
-      output.dataset.state = 'error';
-    });
-  });
+ });
 
-  refreshStatus().then(function (snapshot) {
-    if (snapshot && snapshot.connected) return;
-    if (bridgeAvailable()) connect({ silent: true });
-  });
-  connectFromHash();
-
-  let lastAutoAttempt = Date.now();
-  function maybeAutoConnect() {
-    if (busy || document.hidden) return;
-    if (statusEl.dataset.state === 'connected') return;
-    if (!bridgeAvailable()) return;
-    const now = Date.now();
-    if (now - lastAutoAttempt < 30000) return;
-    lastAutoAttempt = now;
-    connect({ silent: true });
-  }
-  window.addEventListener('focus', maybeAutoConnect);
-  document.addEventListener('visibilitychange', maybeAutoConnect);
+ connectFromHash();
+ refreshStatus();
 })();
