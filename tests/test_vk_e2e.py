@@ -100,6 +100,10 @@ class FakeLoginWindow:
 
     code_submitted = True
     last_error = ""
+    code_page_text = ""
+
+    def enter_code(self, code):
+        return b"fake-jpeg"
 
     def cookies(self):
         return [
@@ -130,6 +134,17 @@ response = client.post("/api/vk/remote/finish", json={})
 payload = response.get_json() or {}
 check("finish with VK cookie connects", response.status_code == 200 and payload.get("connected") is True,
       f"{response.status_code} {payload.get('error', '')}")
+
+# 1b. The numeric code path connects in the same request.
+client.get("/api/vk/session/status")
+session_state = next(iter(server._sessions.values()))
+session_state["vk_remote_browser"] = FakeLoginWindow()
+session_state["vk_service"] = None
+session_state["vk_user_id"] = None
+code_response = client.post("/api/vk/remote/code", json={"code": "123456"})
+code_payload = code_response.get_json() or {}
+check("numeric code connects VK", code_response.status_code == 200 and code_payload.get("connected") is True,
+      f"{code_response.status_code} {code_payload.get('error', '')}")
 
 # 2. Session status reflects the connected account.
 status = client.get("/api/vk/session/status").get_json()

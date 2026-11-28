@@ -431,16 +431,29 @@ async function vkQrSendCode() {
   vkQrMessage.dataset.state = 'error';
   return;
  }
+ vkQrMessage.textContent = 'Отправляю код и подключаю VK…';
+ vkQrMessage.dataset.state = '';
  try {
-  vkQrMessage.textContent = 'Отправляю код в окно VK…';
-  vkQrMessage.dataset.state = '';
-  const data = await vkQrRequest('/api/vk/remote/code', { code: code });
-  vkQrScreen.src = 'data:image/jpeg;base64,' + data.image;
-  if (field) field.value = '';
-  vkQrMessage.textContent = 'Код отправлен. Проверяю вход…';
-  vkQrPoll();
+  const response = await fetch('/api/vk/remote/code', {
+   method: 'POST', credentials: 'same-origin', cache: 'no-store',
+   headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code })
+  });
+  const data = await response.json().catch(function () { return null; });
+  if (data && data.image) vkQrScreen.src = 'data:image/jpeg;base64,' + data.image;
+  if (data && data.connected) {
+   if (field) field.value = '';
+   vkQrMessage.textContent = 'VK Музыка подключена. Загружаю музыку…';
+   vkQrMessage.dataset.state = 'connected';
+   vkQrStopPolling();
+   vkQrStarted = false;
+   if (typeof window.__pulsarVkConnected === 'function') window.__pulsarVkConnected(data);
+   setTimeout(vkQrCloseModal, 1400);
+   return;
+  }
+  vkQrMessage.textContent = (data && data.error) || ('Ошибка ' + response.status);
+  vkQrMessage.dataset.state = 'error';
  } catch (error) {
-  vkQrMessage.textContent = String((error && error.message) || '');
+  vkQrMessage.textContent = 'Не удалось отправить код: ' + ((error && error.message) || '');
   vkQrMessage.dataset.state = 'error';
  }
 }

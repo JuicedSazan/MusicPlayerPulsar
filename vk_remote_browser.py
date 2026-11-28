@@ -108,8 +108,9 @@ class QRLoginBrowser:
         self.screenshot_data = None
         self.leaked_playwright = None
         self.serve_ready = threading.Event()
-        self.code_submitted = False
         self.last_error = ""
+        self.code_stage = ""
+        self.code_page_text = ""
         self.code_stage = ""
         self.page_info = {}
         self.thread = threading.Thread(target=self._run, name="pulsar-vk-qr", daemon=True)
@@ -341,65 +342,91 @@ class QRLoginBrowser:
     def _enter_code_impl(self, page, context, code, stage):
         text = str(code or "")[:12]
         frames = [page] + [item for item in page.frames if item is not page]
+        stage("fill")
         filled = False
         for frame in frames:
-            for selector in ('input[inputmode="numeric"]', 'input[type="tel"]',
-                             'input[type="text"]', 'input'):
-                try:
-                    handle = frame.query_selector(selector)
-                    if handle is not None and handle.is_visible():
-                        handle.fill(text)
+            try:
+                # VK renders six single-character boxes for the new-device code.
+                if frame.query_selector('input[maxlength="1"]') is not None:
+                    boxes = frame.query_selector_all('input[maxlength="1"], input[inputmode="numeric"][maxlength="1"]')
+                    if len(boxes) >= len(text):
+                        for index, char in enumerate(text):
+                            boxes[index].click()
+                            boxes[index].type(char, delay=20)
                         filled = True
-                        break
-                except Exception:
-                    continue
-            if filled:
-                break
+                    break
+            except Exception:
+                continue
+        if not filled:
+            for frame in frames:
+                for selector in ('input[inputmode="numeric"]', 'input[type="tel"]',
+                                 'input[type="text"]', 'input'):
+                    try:
+                        handle = frame.query_selector(selector)
+                        if handle is not None and handle.is_visible():
+                            handle.fill(text)
+                            filled = True
+                            break
+                    except Exception:
+                        continue
+                if filled:
+                    break
         stage("fill-done" if filled else "type")
         if not filled:
             page.keyboard.insert_text(text)
-        try:
-            page.keyboard.press("Enter")
-        except Exception:
-            pass
-        page.wait_for_timeout(900)
+        page.wait_for_timeout(600)
         stage("click")
+        clicked = False
         for frame in frames:
             try:
                 button = frame.get_by_role(
                     "button",
-                    name=re.compile("Продолжить|Подтвердить|Войти|Далее|Отправить|Готово"),
+                    name=re.compile("Продолжить|Подтвердить|Войти|Далее|Отправить|Готово|Next|Continue"),
                 ).first
-                if button is not None and button.is_visible():
+                if button is not None and button.is_visible() and button.is_enabled():
                     button.click()
+                    clicked = True
                     break
             except Exception:
                 continue
-        stage("wait-cookie")
-        deadline = time.monotonic() + 12
+        if not clicked:
+            try:
+                page.keyboard.press("Enter")
+            except Exception:
+                pass
+        stage("after-click")
+        # Only the cookie matters now: stop loading so the VK feed never grows.
+        page.wait_for_timeout(1200)
+        deadline = time.monotonic() + 15
+        got_session = False
         while time.monotonic() < deadline:
             try:
                 names = {item.get("name") for item in context.cookies(["https://vk.ru/"])}
             except Exception:
                 names = set()
             if "remixsid" in names:
-                try:
-                    page.evaluate("() => window.stop()")
-                except Exception:
-                    pass
-                # The session exists. Keep the page frozen on the login screen:
-                # loading the feed is what pushes the process over the instance
-                # memory limit, and a frozen page keeps cookie reads safe.
-                try:
-                    page.evaluate("() => window.stop()")
-                except Exception:
-                    pass
-                self.code_submitted = True
-                return self._capture(page)
+                got_session = True
+                break
             page.wait_for_timeout(400)
+        try:
+            page.evaluate("() => window.stop()")
+        except Exception:
+            pass
         stage("capture")
         self.code_submitted = True
+        self.code_page_text = self._page_text(page)
+        self.last_error = self.last_error if got_session else ("code@no-session: " + self.code_page_text[:200])
         return self._capture(page)
+
+    @staticmethod
+    def _page_text(page):
+        text = ""
+        for target in [page] + [frame for frame in page.frames if frame is not page]:
+            try:
+                text += "\n" + (target.evaluate("() => (document.body && document.body.innerText) || ''") or "")
+            except Exception:
+                continue
+        return " ".join(text.split())[:400]
 
     # --------------------------------------------------------------- commands
     def _release_slot(self):

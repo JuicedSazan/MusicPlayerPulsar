@@ -675,9 +675,34 @@ def api_vk_remote_screen():
         return api_error("Не удалось получить изображение VK: " + str(exc)[:180], 502)
 
 
+def _vk_session_from_cookies(cookies):
+    """Pick the VK session cookies from a cookie list, preferring vk.ru."""
+    remixsid = ""
+    cookie_p = ""
+    domain = "vk.ru"
+    for cookie in cookies or []:
+        if not isinstance(cookie, dict):
+            continue
+        name = str(cookie.get("name") or "")
+        value = str(cookie.get("value") or "")
+        cookie_domain = str(cookie.get("domain") or "")
+        if not value or name not in ("remixsid", "p"):
+            continue
+        if cookie_domain.endswith("vk.ru"):
+            if name == "remixsid" and not remixsid:
+                remixsid = value
+                domain = "vk.ru"
+            elif name == "p" and not cookie_p:
+                cookie_p = value
+        elif cookie_domain.endswith("vk.com") and not remixsid and name == "remixsid":
+            remixsid = value
+            domain = "vk.com"
+    return remixsid, cookie_p, domain
+
+
 @app.post("/api/vk/remote/code")
 def api_vk_remote_code():
-    """Type the new-device confirmation code shown by the VK app into the QR page."""
+    """Type the new-device confirmation code and connect VK Music right away."""
     s = state()
     with s["lock"]:
         browser = s.get("vk_remote_browser")
@@ -691,10 +716,35 @@ def api_vk_remote_code():
     try:
         import base64
         image = base64.b64encode(browser.enter_code(digits)).decode("ascii")
-        return jsonify({"ok": True, "image": image, "width": browser.WIDTH, "height": browser.HEIGHT})
+        cookies = browser.cookies()
     except Exception as exc:
         detail = getattr(browser, "last_error", "") or str(exc).replace("\n", " ")
-        return api_error("Не удалось отправить код в окно VK: " + str(detail)[:300], 502)
+        return api_error("Не удалось отправить код в окно VK: " + str(detail)[:340], 502)
+    remixsid, cookie_p, domain = _vk_session_from_cookies(cookies)
+    page_text = getattr(browser, "code_page_text", "") or ""
+    if not remixsid:
+        message = "VK не принял код."
+        if page_text:
+            message += " Экран VK: " + page_text[:200]
+        return jsonify({"ok": False, "error": message, "image": image, "pending": True}), 401
+    if VKMusicService is None:
+        return api_error("VKpyMusic не установлена на сервере.", 503)
+    try:
+        connection = _vk_cookie_connection(remixsid, cookie_p, browser.user_agent(), domain)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": "Вход принят, но VK Музыка не подключилась: " + str(exc)[:220],
+                        "image": image}), 502
+    _vk_store_connection(
+        s, connection["service"], connection["user_id"], connection["user_name"],
+        remixsid=remixsid, cookie_p=cookie_p, user_agent=browser.user_agent(),
+        cookie_domain=domain, expires=connection["expires"],
+    )
+    with s["lock"]:
+        s["vk_remote_browser"] = None
+    _vk_login_release(browser)
+    snapshot = _vk_session_snapshot(s)
+    snapshot.update(ok=True, connected=True, message="VK Музыка подключена.", image=image)
+    return jsonify(snapshot)
 
 
 @app.post("/api/vk/remote/input")
@@ -751,26 +801,7 @@ def api_vk_remote_finish():
     except Exception as exc:
         detail = getattr(browser, "last_error", "") or str(exc).replace("\n", " ")
         return api_error("Не удалось прочитать сессию VK: " + str(detail)[:300], 502)
-    remixsid = ""
-    cookie_p = ""
-    domain = "vk.ru"
-    for cookie in cookies:
-        if not isinstance(cookie, dict):
-            continue
-        name = str(cookie.get("name") or "")
-        value = str(cookie.get("value") or "")
-        cookie_domain = str(cookie.get("domain") or "")
-        if not value or name not in ("remixsid", "p"):
-            continue
-        if cookie_domain.endswith("vk.ru"):
-            if name == "remixsid" and not remixsid:
-                remixsid = value
-                domain = "vk.ru"
-            elif name == "p" and not cookie_p:
-                cookie_p = value
-        elif cookie_domain.endswith("vk.com") and not remixsid and name == "remixsid":
-            remixsid = value
-            domain = "vk.com"
+    remixsid, cookie_p, domain = _vk_session_from_cookies(cookies)
     if not remixsid:
         submitted = bool(getattr(browser, "code_submitted", False))
         return api_error(
